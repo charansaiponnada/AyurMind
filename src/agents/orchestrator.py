@@ -16,13 +16,15 @@ class OrchestratorAgent:
         needs_dosha = any(term in query_lower for term in ['symptom', 'problem', 'pain', 'disorder', 'disease', 'sick', 'imbalance'])
         needs_treatment = any(term in query_lower for term in ['treatment', 'remedy', 'cure', 'help', 'diet', 'food', 'herb', 'medicine'])
         
-        if not (needs_prakriti or needs_dosha or needs_treatment):
-            needs_prakriti = needs_dosha = needs_treatment = True
-        
+        # This no longer defaults to activating all agents. If no keywords match,
+        # it correctly signals a general, non-Ayurvedic query.
         return {'prakriti': needs_prakriti, 'dosha': needs_dosha, 'treatment': needs_treatment}
-    
-    def process_query(self, query: str, conversation_history: List[Dict] = None) -> Dict:
-        agent_activation = self.analyze_query(query)
+
+    def process_query(self, query: str, agent_activation: Dict, conversation_history: List[Dict] = None) -> Dict:
+        """
+        Processes the query by activating the necessary specialist agents and synthesizing their findings.
+        This is the "slow path" for complex Ayurvedic queries.
+        """
         results = {}
         
         if agent_activation['prakriti']:
@@ -65,5 +67,24 @@ class OrchestratorAgent:
         return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200)
     
     def simple_query(self, query: str) -> str:
-        result = self.process_query(query)
-        return result['final_response']
+        """
+        Analyzes the query and routes it to either the fast-path (general query)
+        or the slow-path (Ayurvedic query).
+        """
+        agent_activation = self.analyze_query(query)
+        is_ayurvedic_query = any(agent_activation.values())
+
+        if is_ayurvedic_query:
+            # SLOW PATH: Use the full multi-agent process for Ayurvedic questions.
+            result = self.process_query(query, agent_activation)
+            return result['final_response']
+        else:
+            # FAST PATH: Bypass agents for a direct, quick answer to general questions.
+            system_prompt = "You are a helpful general assistant. Provide a concise and direct answer. If you are asked about Ayurveda, gently state that you can answer those questions in more detail if the user asks a more specific question about symptoms, constitution, or treatments."
+            return self.llm_client.generate(
+                prompt=query, 
+                system_prompt=system_prompt,
+                # Use a slightly higher temperature for more natural general conversation
+                temperature=0.4, 
+                max_tokens=1000
+            )
