@@ -23,6 +23,7 @@ from src.rag.embeddings import EmbeddingGenerator
 from src.rag.vectorstore import AyurvedicVectorStore
 from src.rag.retriever import RAGRetriever
 from src.llm.google_client import GoogleClient
+from src.llm.openai_client import OpenAIClient
 from src.agents.prakriti_agent import PrakritiAgent
 from src.agents.dosha_agent import DoshaAgent
 from src.agents.treatment_agent import TreatmentAgent
@@ -43,15 +44,25 @@ class AyurMindApp:
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        # Initialize LLM client - Now using Google Gemini exclusively
-        try:
-            self.llm_client = GoogleClient()
-            app_logger.info(f"✅ Using Google client with model: {self.llm_client.model_name}")
-        except Exception as e:
-            app_logger.error(f"Failed to initialize GoogleClient: {e}")
-            # Exit if the client can't be initialized, as it's critical.
-            self.llm_client = None
-            raise e
+        # Initialize LLM client - with OpenAI preference and Google fallback
+        self.llm_client = None
+        use_openai = os.getenv("USE_OPENAI", "false").lower() == "true"
+
+        if use_openai:
+            try:
+                self.llm_client = OpenAIClient()
+                app_logger.info(f"✅ Using OpenAI client with model: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.warning(f"OpenAI Client failed to initialize: {e}. Falling back to Google Client.")
+
+        if self.llm_client is None: # If OpenAI wasn't chosen or failed
+            try:
+                self.llm_client = GoogleClient()
+                app_logger.info(f"✅ Using Google client with model: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.error(f"Failed to initialize GoogleClient: {e}. No LLM client available.")
+                raise e # Critical failure if no client can be initialized
+        
         
         # Initialize agents
         self.prakriti_agent = PrakritiAgent(self.retriever, self.llm_client)
