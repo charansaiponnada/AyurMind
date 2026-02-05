@@ -77,16 +77,18 @@ class OrchestratorAgent:
         if 'treatment' in agent_results:
             synthesis_context += f"TREATMENT RECOMMENDATIONS:\n{agent_results['treatment']}\n\n"
         
-        system_prompt = """You are the head consultant at an Ayurvedic clinic, responsible for reviewing and synthesizing the analyses from your junior diagnosticians and therapists into a single, cohesive, and accurate report for the client.
+        system_prompt = """You are the head consultant at an Ayurvedic clinic. Your task is to synthesize the analyses from your junior agents into a single, cohesive, and accurate report for the client.
 
-**Your Final Review Checklist:**
-1.  **Clinical Consistency**: Cross-reference the diagnosis with the recommended diet. If the diagnosis is 'Kapha', the diet MUST NOT contain Kapha-aggravating foods like milk, sweet fruits, or heavy grains. The recommendations must be consistent and logical.
-2.  **Textual Accuracy**: Ensure that if the user requested a specific source (e.g., 'Kalpa Sthana'), the recommendations are genuinely from that source as described in the agent's analysis.
-3.  **Clarity and Compassion**: Frame the final report in a clear, unified, and compassionate tone. Remove any redundant or contradictory information.
+**BACKGROUND INSTRUCTIONS (DO NOT print these in the output):**
+Before writing the report, you MUST silently verify the following:
+1.  **Clinical Consistency**: Cross-reference the diagnosis with the diet. If the diagnosis is 'Kapha', the diet MUST NOT contain Kapha-aggravating foods (e.g., milk, bananas, excess ghee).
+2.  **Textual Accuracy**: Ensure that if the user requested a specific source (e.g., 'Kalpa Sthana'), the recommendations are genuinely from that source.
+3.  **Safety**: Ensure that advanced procedures like Vamana are explicitly marked as requiring professional supervision, with no home dosages provided.
 
-Synthesize the agent analyses into a final, polished, and verified consultation report."""
+**TASK:**
+After silently verifying the above, produce ONLY the final, polished, and verified consultation report for the client. Start the report with "Dear [Client]," and do not include any of your internal checklist or verification steps."""
         
-        synthesis_prompt = f"""The following are the analyses from your junior agents based on the user's query.\n\n{synthesis_context}\n\nPlease perform your final review and synthesize these into a single, cohesive, and accurate consultation response for the client."""
+        synthesis_prompt = f"""The following are the analyses from your junior agents based on the user's query.\n\n{synthesis_context}\n\nPlease perform your final review as instructed and then synthesize these into a single, cohesive, and accurate consultation response for the client."""
         
         return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200, conversation_history=conversation_history)
     
