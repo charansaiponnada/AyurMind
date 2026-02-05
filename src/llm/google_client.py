@@ -63,7 +63,8 @@ class GoogleClient:
             )
             
             # The last message in the response's history is the model's reply
-            return response.text
+            # Using the full path to avoid potential bugs in the .text accessor
+            return response.candidates[0].content.parts[0].text
 
         except Exception as e:
             # Catching a broad exception to handle various API errors
