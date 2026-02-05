@@ -1,0 +1,45 @@
+# Core Dependencies
+python-dotenv==1.0.0
+pydantic==2.5.0
+pyyaml==6.0.1
+
+# Web Scraping
+requests==2.31.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+html2text==2020.1.16
+
+# RAG & Vector Database
+langchain==0.1.0
+langchain-community==0.0.13
+chromadb==0.4.22
+sentence-transformers==2.3.1
+
+# LLM APIs
+openai==1.7.2  # For OpenRouter compatibility
+httpx==0.25.2
+
+# UI
+gradio==4.15.0
+
+# Data Processing
+numpy==1.26.2
+pandas==2.1.4
+tiktoken==0.5.2
+
+# Utilities
+tqdm==4.66.1
+colorama==0.4.6
+python-slugify==8.0.1
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+
+# Development (optional)
+black==23.12.1
+flake8==7.0.0
+mypy==1.8.0
+ipykernel==6.28.0
+jupyter==1.0.0

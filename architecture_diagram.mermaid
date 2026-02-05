@@ -1,0 +1,85 @@
+graph TB
+    subgraph "User Interface Layer"
+        UI[Gradio Web Interface<br/>Bilingual: English/Hindi]
+    end
+    
+    subgraph "Orchestration Layer"
+        ORCH[Orchestrator Agent<br/>Coordination & Synthesis]
+    end
+    
+    subgraph "Specialized Agent Layer"
+        A1[Prakriti Assessor Agent<br/>Constitutional Type Analysis]
+        A2[Dosha Imbalance Detector<br/>Vikriti Identification]
+        A3[Treatment Recommender<br/>Personalized Interventions]
+    end
+    
+    subgraph "Retrieval-Augmented Generation Layer"
+        RAG[RAG Pipeline<br/>LangChain]
+        EMBED[Embedding Model<br/>sentence-transformers]
+        VDB[(ChromaDB<br/>Vector Database)]
+    end
+    
+    subgraph "Language Model Layer"
+        LLM[Llama-3-8B / Mistral-7B<br/>via Ollama]
+    end
+    
+    subgraph "Knowledge Base Layer"
+        KB1[Charaka Samhita<br/>Chunked & Indexed]
+        KB2[Sushruta Samhita<br/>Chunked & Indexed]
+        KB3[Ashtanga Hridaya<br/>Chunked & Indexed]
+    end
+    
+    %% User interactions
+    UI -->|User Query| ORCH
+    ORCH -->|Final Response| UI
+    
+    %% Orchestrator to agents
+    ORCH -->|Delegate: Assess Constitution| A1
+    ORCH -->|Delegate: Detect Imbalances| A2
+    ORCH -->|Delegate: Recommend Treatment| A3
+    
+    A1 -->|Prakriti Assessment| ORCH
+    A2 -->|Dosha Analysis| ORCH
+    A3 -->|Treatment Plan| ORCH
+    
+    %% Agents to RAG
+    A1 -->|Query: Constitution traits| RAG
+    A2 -->|Query: Symptoms & causes| RAG
+    A3 -->|Query: Therapies & herbs| RAG
+    
+    RAG -->|Retrieved Context| A1
+    RAG -->|Retrieved Context| A2
+    RAG -->|Retrieved Context| A3
+    
+    %% RAG to Vector DB
+    RAG -->|Semantic Search| VDB
+    VDB -->|Top-K Relevant Chunks| RAG
+    
+    %% Embedding flow
+    EMBED -->|Generate Embeddings| VDB
+    
+    %% Knowledge base to vector DB
+    KB1 -->|Indexed Content| VDB
+    KB2 -->|Indexed Content| VDB
+    KB3 -->|Indexed Content| VDB
+    
+    %% LLM usage
+    ORCH -.->|LLM Calls| LLM
+    A1 -.->|LLM Calls| LLM
+    A2 -.->|LLM Calls| LLM
+    A3 -.->|LLM Calls| LLM
+    
+    %% Styling
+    classDef userLayer fill:#E3F2FD,stroke:#1976D2,stroke-width:2px
+    classDef orchestLayer fill:#FFF3E0,stroke:#F57C00,stroke-width:2px
+    classDef agentLayer fill:#E8F5E9,stroke:#388E3C,stroke-width:2px
+    classDef ragLayer fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px
+    classDef llmLayer fill:#FCE4EC,stroke:#C2185B,stroke-width:2px
+    classDef kbLayer fill:#FFF9C4,stroke:#F9A825,stroke-width:2px
+    
+    class UI userLayer
+    class ORCH orchestLayer
+    class A1,A2,A3 agentLayer
+    class RAG,EMBED,VDB ragLayer
+    class LLM llmLayer
+    class KB1,KB2,KB3 kbLayer

@@ -1,0 +1,62 @@
+sequenceDiagram
+    participant User
+    participant UI as Gradio Interface
+    participant Orch as Orchestrator Agent
+    participant P as Prakriti Agent
+    participant D as Dosha Agent
+    participant T as Treatment Agent
+    participant RAG as RAG Pipeline
+    participant VDB as ChromaDB
+    participant LLM as Llama-3-8B
+
+    User->>UI: "I have digestive issues, anxiety, dry skin"
+    UI->>Orch: Forward user query
+    
+    Note over Orch: Analyze query<br/>Determine agent sequence
+    
+    rect rgb(227, 242, 253)
+    Note right of Orch: Phase 1: Constitutional Assessment
+    Orch->>P: "Assess user's Prakriti"
+    P->>RAG: Query: "Vata characteristics dry skin anxiety"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks
+    RAG-->>P: Retrieved context from Charaka Samhita
+    P->>LLM: Prompt + Context + User info
+    LLM-->>P: Analysis result
+    P-->>Orch: "Likely Vata-dominant constitution"
+    end
+    
+    rect rgb(232, 245, 233)
+    Note right of Orch: Phase 2: Imbalance Detection
+    Orch->>D: "Identify Dosha imbalances"
+    D->>RAG: Query: "digestive issues anxiety causes"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks
+    RAG-->>D: Retrieved disease causation texts
+    D->>LLM: Prompt + Context + Symptoms
+    LLM-->>D: Diagnostic result
+    D-->>Orch: "Vata aggravation confirmed"
+    end
+    
+    rect rgb(255, 243, 224)
+    Note right of Orch: Phase 3: Treatment Recommendation
+    Orch->>T: "Suggest Vata-balancing treatments"
+    T->>RAG: Query: "Vata pacifying diet herbs lifestyle"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 treatment protocols
+    RAG-->>T: Retrieved therapy guidelines
+    T->>LLM: Prompt + Context + Prakriti + Vikriti
+    LLM-->>T: Treatment recommendations
+    T-->>Orch: "Warm foods, ashwagandha, oil massage"
+    end
+    
+    rect rgb(243, 229, 245)
+    Note right of Orch: Phase 4: Synthesis
+    Orch->>LLM: Synthesize all agent outputs
+    LLM-->>Orch: Holistic consultation report
+    end
+    
+    Orch->>UI: Complete recommendation with citations
+    UI->>User: Display formatted response
+    
+    Note over User,LLM: All recommendations grounded in<br/>retrieved classical texts (no hallucinations)
