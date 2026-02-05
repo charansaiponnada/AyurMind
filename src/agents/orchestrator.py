@@ -77,9 +77,16 @@ class OrchestratorAgent:
         if 'treatment' in agent_results:
             synthesis_context += f"TREATMENT RECOMMENDATIONS:\n{agent_results['treatment']}\n\n"
         
-        system_prompt = """You are the Orchestrator synthesizing Ayurvedic consultation. Create a unified, holistic report. Keep it clear and compassionate."""
+        system_prompt = """You are the head consultant at an Ayurvedic clinic, responsible for reviewing and synthesizing the analyses from your junior diagnosticians and therapists into a single, cohesive, and accurate report for the client.
+
+**Your Final Review Checklist:**
+1.  **Clinical Consistency**: Cross-reference the diagnosis with the recommended diet. If the diagnosis is 'Kapha', the diet MUST NOT contain Kapha-aggravating foods like milk, sweet fruits, or heavy grains. The recommendations must be consistent and logical.
+2.  **Textual Accuracy**: Ensure that if the user requested a specific source (e.g., 'Kalpa Sthana'), the recommendations are genuinely from that source as described in the agent's analysis.
+3.  **Clarity and Compassion**: Frame the final report in a clear, unified, and compassionate tone. Remove any redundant or contradictory information.
+
+Synthesize the agent analyses into a final, polished, and verified consultation report."""
         
-        synthesis_prompt = f"""Original Query: {query}\n\n{synthesis_context}\n\nPlease synthesize the above analyses into a cohesive consultation response."""
+        synthesis_prompt = f"""The following are the analyses from your junior agents based on the user's query.\n\n{synthesis_context}\n\nPlease perform your final review and synthesize these into a single, cohesive, and accurate consultation response for the client."""
         
         return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200, conversation_history=conversation_history)
     
