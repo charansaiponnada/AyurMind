@@ -95,7 +95,7 @@ class AyurMindApp:
             # add user message
             history.append({"role": "user", "content": message})
 
-            response = self.orchestrator.simple_query(message)
+            response = self.orchestrator.simple_query(message, history)
 
             # add assistant message
             history.append({"role": "assistant", "content": response})

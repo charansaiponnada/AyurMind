@@ -22,7 +22,7 @@ class BaseAgent(ABC):
         category_filter = self.get_category_filter()
         return self.rag_retriever.build_context(query=query, n_results=n_results, category_filter=category_filter, include_metadata=True)
     
-    def generate_response(self, query: str, context: str = None, additional_info: Dict = None) -> str:
+    def generate_response(self, query: str, context: str = None, additional_info: Dict = None, conversation_history: list = None) -> str:
         if context is None:
             context = self.retrieve_context(query)
         
@@ -34,10 +34,11 @@ class BaseAgent(ABC):
         
         return self.llm_client.generate_with_context(
             query=enhanced_query, context=context, system_prompt=self.get_system_prompt(),
-            temperature=self.temperature, max_tokens=self.max_tokens
+            temperature=self.temperature, max_tokens=self.max_tokens,
+            conversation_history=conversation_history
         )
     
-    def process(self, query: str, additional_info: Dict = None) -> Dict:
+    def process(self, query: str, additional_info: Dict = None, conversation_history: list = None) -> Dict:
         context = self.retrieve_context(query)
-        response = self.generate_response(query, context, additional_info)
+        response = self.generate_response(query, context, additional_info, conversation_history)
         return {'agent': self.name, 'response': response, 'context': context, 'query': query}

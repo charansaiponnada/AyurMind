@@ -28,12 +28,12 @@ class OrchestratorAgent:
         results = {}
         
         if agent_activation['prakriti']:
-            prakriti_result = self.prakriti_agent.process(query)
+            prakriti_result = self.prakriti_agent.process(query, conversation_history=conversation_history)
             results['prakriti'] = prakriti_result['response']
         
         if agent_activation['dosha']:
             additional_info = {'Prakriti Assessment': results['prakriti']} if 'prakriti' in results else {}
-            dosha_result = self.dosha_agent.process(query, additional_info)
+            dosha_result = self.dosha_agent.process(query, additional_info, conversation_history)
             results['dosha'] = dosha_result['response']
         
         if agent_activation['treatment']:
@@ -43,14 +43,14 @@ class OrchestratorAgent:
             if 'dosha' in results:
                 additional_info['Dosha Imbalance'] = results['dosha']
             
-            treatment_result = self.treatment_agent.process(query, additional_info)
+            treatment_result = self.treatment_agent.process(query, additional_info, conversation_history)
             results['treatment'] = treatment_result['response']
         
-        synthesized_response = self.synthesize_response(query, results)
+        synthesized_response = self.synthesize_response(query, results, conversation_history)
         
         return {'query': query, 'agent_responses': results, 'final_response': synthesized_response, 'agent_activation': agent_activation}
     
-    def synthesize_response(self, query: str, agent_results: Dict) -> str:
+    def synthesize_response(self, query: str, agent_results: Dict, conversation_history: List[Dict] = None) -> str:
         synthesis_context = "Agent Analyses:\n\n"
         
         if 'prakriti' in agent_results:
@@ -64,9 +64,9 @@ class OrchestratorAgent:
         
         synthesis_prompt = f"""Original Query: {query}\n\n{synthesis_context}\n\nPlease synthesize the above analyses into a cohesive consultation response."""
         
-        return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200)
+        return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200, conversation_history=conversation_history)
     
-    def simple_query(self, query: str) -> str:
+    def simple_query(self, query: str, conversation_history: List[Dict] = None) -> str:
         """
         Analyzes the query and routes it to either the fast-path (general query)
         or the slow-path (Ayurvedic query).
@@ -76,7 +76,7 @@ class OrchestratorAgent:
 
         if is_ayurvedic_query:
             # SLOW PATH: Use the full multi-agent process for Ayurvedic questions.
-            result = self.process_query(query, agent_activation)
+            result = self.process_query(query, agent_activation, conversation_history)
             return result['final_response']
         else:
             # FAST PATH: Bypass agents for a direct, quick answer to general questions.
@@ -86,5 +86,6 @@ class OrchestratorAgent:
                 system_prompt=system_prompt,
                 # Use a slightly higher temperature for more natural general conversation
                 temperature=0.4, 
-                max_tokens=1000
+                max_tokens=1000,
+                conversation_history=conversation_history
             )
