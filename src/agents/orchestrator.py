@@ -1,6 +1,7 @@
 """Orchestrator - Coordinates all agents"""
 import os
-from typing import Dict, List
+import re
+from typing import Dict, List, Optional
 
 class OrchestratorAgent:
     def __init__(self, prakriti_agent, dosha_agent, treatment_agent, llm_client):
@@ -10,6 +11,19 @@ class OrchestratorAgent:
         self.llm_client = llm_client
         self.temperature = float(os.getenv("ORCHESTRATOR_TEMP", "0.2"))
     
+    def _extract_requested_sources(self, query: str) -> Optional[str]:
+        """Extracts requested sources like 'Siddhi Sthana' using regex."""
+        # This regex looks for patterns like "(from/in) [Word] Sthana" or "[Word] Samhita"
+        match = re.search(r"(?:from|in)\s+((?:\w+\s+)?(?:Sthana|Samhita|Kalpa))", query, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # A simpler check if the above fails
+        if "siddhi sthana" in query.lower():
+            return "Siddhi Sthana"
+        if "kalpa sthana" in query.lower():
+            return "Kalpa Sthana"
+        return None
+
     def analyze_query(self, query: str) -> Dict:
         query_lower = query.lower()
         needs_prakriti = any(term in query_lower for term in ['constitution', 'prakriti', 'vata', 'pitta', 'kapha', 'body type'])
@@ -26,6 +40,7 @@ class OrchestratorAgent:
         This is the "slow path" for complex Ayurvedic queries.
         """
         results = {}
+        requested_source = self._extract_requested_sources(query)
         
         if agent_activation['prakriti']:
             prakriti_result = self.prakriti_agent.process(query, conversation_history=conversation_history)
@@ -42,6 +57,8 @@ class OrchestratorAgent:
                 additional_info['Prakriti'] = results['prakriti']
             if 'dosha' in results:
                 additional_info['Dosha Imbalance'] = results['dosha']
+            if requested_source:
+                additional_info['Requested Source'] = requested_source
             
             treatment_result = self.treatment_agent.process(query, additional_info, conversation_history)
             results['treatment'] = treatment_result['response']
