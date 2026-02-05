@@ -39,7 +39,7 @@ class GoogleClient:
     def generate(self, prompt: str, system_prompt: Optional[str] = None, 
                  temperature: float = 0.5, max_tokens: int = 2048, 
                  conversation_history: Optional[List[Dict]] = None, **kwargs) -> str:
-        """Generate response from Gemini model."""
+        """Generate response from Gemini model using the stateless generate_content method."""
         
         try:
             model = genai.GenerativeModel(
@@ -47,18 +47,22 @@ class GoogleClient:
                 system_instruction=system_prompt
             )
             
-            # The Gemini API expects the history to be managed externally and passed to start_chat
-            # The last user message is the `prompt` parameter.
-            history = self._format_history(conversation_history) if conversation_history else []
-            chat = model.start_chat(history=history)
+            # Combine the previous history with the current user prompt
+            full_history = self._format_history(conversation_history) if conversation_history else []
+            full_history.append({"role": "user", "parts": [{"text": prompt}]})
 
             generation_config = genai.types.GenerationConfig(
                 temperature=temperature,
                 max_output_tokens=max_tokens
             )
 
-            response = chat.send_message(prompt, generation_config=generation_config)
+            response = model.generate_content(
+                full_history,
+                generation_config=generation_config,
+                stream=False
+            )
             
+            # The last message in the response's history is the model's reply
             return response.text
 
         except Exception as e:
