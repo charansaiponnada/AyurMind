@@ -17,6 +17,7 @@ sentence-transformers==2.3.1
 
 # LLM APIs
 openai==1.7.2  # For OpenRouter compatibility
+google-generativeai==0.5.4
 httpx==0.25.2
 
 # UI

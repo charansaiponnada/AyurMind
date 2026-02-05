@@ -22,8 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.rag.embeddings import EmbeddingGenerator
 from src.rag.vectorstore import AyurvedicVectorStore
 from src.rag.retriever import RAGRetriever
-from src.llm.openrouter_client import OpenRouterClient
-from src.llm.local_client import OllamaClient
+from src.llm.google_client import GoogleClient
 from src.agents.prakriti_agent import PrakritiAgent
 from src.agents.dosha_agent import DoshaAgent
 from src.agents.treatment_agent import TreatmentAgent
@@ -44,15 +43,14 @@ class AyurMindApp:
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        # Initialize LLM client - Now using OpenRouter exclusively
+        # Initialize LLM client - Now using Google Gemini exclusively
         try:
-            self.llm_client = OpenRouterClient()
-            app_logger.info(f"✅ Using OpenRouter client with model: {self.llm_client.model}")
+            self.llm_client = GoogleClient()
+            app_logger.info(f"✅ Using Google client with model: {self.llm_client.model_name}")
         except Exception as e:
-            app_logger.error(f"Failed to initialize OpenRouterClient: {e}")
+            app_logger.error(f"Failed to initialize GoogleClient: {e}")
             # Exit if the client can't be initialized, as it's critical.
-            # We also log the error to the UI.
-            self.llm_client = None # Ensure llm_client is None so the app doesn't start
+            self.llm_client = None
             raise e
         
         # Initialize agents
