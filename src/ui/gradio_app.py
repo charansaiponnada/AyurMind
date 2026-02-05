@@ -44,22 +44,16 @@ class AyurMindApp:
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        # Initialize LLM client - try local first
-        use_local = os.getenv("USE_LOCAL_FALLBACK", "true").lower() == "true"
-        
-        if use_local:
-            try:
-                self.llm_client = OllamaClient()
-                if not self.llm_client.is_available():
-                    raise Exception("Ollama not running")
-                app_logger.info("✅ Using Local Ollama (free, unlimited)")
-            except Exception as e:
-                app_logger.warning(f"Ollama unavailable: {e}")
-                app_logger.info("Falling back to OpenRouter API")
-                self.llm_client = OpenRouterClient()
-        else:
+        # Initialize LLM client - Now using OpenRouter exclusively
+        try:
             self.llm_client = OpenRouterClient()
-            app_logger.info("Using OpenRouter API")
+            app_logger.info(f"✅ Using OpenRouter client with model: {self.llm_client.model}")
+        except Exception as e:
+            app_logger.error(f"Failed to initialize OpenRouterClient: {e}")
+            # Exit if the client can't be initialized, as it's critical.
+            # We also log the error to the UI.
+            self.llm_client = None # Ensure llm_client is None so the app doesn't start
+            raise e
         
         # Initialize agents
         self.prakriti_agent = PrakritiAgent(self.retriever, self.llm_client)
