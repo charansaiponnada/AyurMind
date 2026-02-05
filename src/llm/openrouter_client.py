@@ -21,7 +21,7 @@ class OpenRouterClient:
                 "Get free key at: https://openrouter.ai/keys"
             )
         
-        self.model = model or os.getenv("DEFAULT_MODEL", "mistralai/mistral-7b-instruct:free")
+        self.model = model or os.getenv("DEFAULT_MODEL", "meta-llama/llama-3.2-3b-instruct:free")
         self.base_url = base_url
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",

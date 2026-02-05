@@ -1,0 +1,47 @@
+Of course. Here is a set of questions designed to test the different areas of knowledge you have scraped. They are categorized by the type of reasoning they
+  will test in your AyurMind system, from simple data retrieval to complex, multi-agent diagnosis.
+
+  Category 1: Testing Fundamental Principles (Sutra Sthana)
+  These questions test basic RAG retrieval and understanding of core Ayurvedic concepts.
+
+   * "What are the fundamental principles of Ayurveda according to the Sutra Sthana?"
+   * "Explain the concept of 'tridosha' (Vata, Pitta, Kapha) and their primary qualities."
+   * "What is the importance of 'dinacharya' (daily routine) for maintaining health?"
+   * "Describe the six tastes ('rasas') and their effects on the doshas."
+
+  Category 2: Testing Diagnostic Abilities (Nidana Sthana)
+  These questions test the Dosha Imbalance Detector agent's ability to connect symptoms to diseases.
+
+   * "What are the primary causes and premonitory signs of 'Jvara' (fever)?"
+   * "I have a persistent sour taste in my mouth and a burning sensation in my chest. Which dosha imbalance does this point to according to Nidana Sthana?"
+   * "Describe the five stages of disease pathogenesis, from 'sanchaya' to 'bheda'."
+   * "What are the causes of 'Raktapitta' (bleeding disorders)?"
+
+  Category 3: Testing Constitutional Assessment (Vimana & Sharira Sthana)
+  These questions test the Prakriti Assessor agent's ability to determine constitutional type based on user descriptions.
+
+   * "How is an individual's 'Prakriti' (constitution) determined at the time of conception, as explained in the Sharira Sthana?"
+   * "I have a tendency to gain weight, my skin is oily, and I have a calm, steady personality. What might my dominant dosha be?"
+   * "According to the Vimana Sthana, what factors should be examined to understand a patient's constitution and current state of health?"
+   * "Explain the relationship between the mind ('sattva', 'rajas', 'tamas') and the physical constitution."
+
+  Category 4: Testing Treatment & Therapy Recommendations (Chikitsa, Kalpa, & Siddhi Sthana)
+  These questions test the Treatment Recommender agent's ability to suggest therapies.
+
+   * "What is the recommended 'shodhana' (purification) therapy for a strong person with a severe Kapha imbalance?"
+   * "Describe the procedure and benefits of 'Basti' (therapeutic enema) as detailed in the Siddhi Sthana."
+   * "What are the formulations and uses of 'Amalaki' as described in the Chikitsa Sthana?"
+   * "What dietary guidelines are recommended for someone suffering from 'Atisara' (diarrhea)?"
+
+  Category 5: Complex Scenarios (Testing the Full Orchestrator Workflow)
+  These are multi-part questions designed to test the entire agentic pipeline, from assessment to treatment recommendation and synthesis.
+
+   * Scenario A (Vata Imbalance): "I am a 35-year-old artist. I am naturally thin, have dry skin, and my mind is always racing with ideas. Recently, I've been
+     experiencing anxiety, insomnia, and cracking joints. Analyze my likely Prakriti and current Vikriti (imbalance), and suggest a plan with both diet and
+     lifestyle changes to bring me back to balance."
+   * Scenario B (Pitta Imbalance): "A 45-year-old manager complains of frequent acid reflux, skin rashes, and irritability. He has a sharp intellect and is a
+     natural leader but gets angry easily. Based on these signs, what is his probable constitution and imbalance? What therapeutic principles from the Chikitsa
+     Sthana would be most effective for him?"
+   * Scenario C (Kapha Imbalance): "I feel sluggish and heavy, especially in the morning. I have gained weight recently, have a slow digestion, and suffer from
+     sinus congestion. Please identify the likely doshic issue and recommend both a purification procedure (from Siddhi Sthana) and some herbal preparations
+     (from Kalpa Sthana) to help."

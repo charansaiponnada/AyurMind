@@ -1,9 +1,22 @@
-"""Gradio Chat Interface"""
-import os, sys
+"""
+Gradio Chat Interface
+"""
+
+import os
+import sys
 from pathlib import Path
 import gradio as gr
 from dotenv import load_dotenv
+import logging
 
+# Setup logger with unique name to avoid conflicts
+app_logger = logging.getLogger('ayurmind.ui')
+app_logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(levelname)s:%(name)s:%(message)s'))
+app_logger.addHandler(handler)
+
+# Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.rag.embeddings import EmbeddingGenerator
@@ -18,36 +31,84 @@ from src.agents.orchestrator import OrchestratorAgent
 
 load_dotenv()
 
+
 class AyurMindApp:
+    """AyurMind Gradio Application"""
+    
     def __init__(self):
+        """Initialize the application"""
+        app_logger.info("Initializing AyurMind application...")
+        
+        # Initialize RAG components
         self.vectorstore = AyurvedicVectorStore()
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        use_local = os.getenv("USE_LOCAL_FALLBACK", "false").lower() == "true"
+        # Initialize LLM client - try local first
+        use_local = os.getenv("USE_LOCAL_FALLBACK", "true").lower() == "true"
         
-        try:
-            self.llm_client = OpenRouterClient()
-        except:
-            if use_local:
+        if use_local:
+            try:
                 self.llm_client = OllamaClient()
-            else:
-                raise
+                if not self.llm_client.is_available():
+                    raise Exception("Ollama not running")
+                app_logger.info("✅ Using Local Ollama (free, unlimited)")
+            except Exception as e:
+                app_logger.warning(f"Ollama unavailable: {e}")
+                app_logger.info("Falling back to OpenRouter API")
+                self.llm_client = OpenRouterClient()
+        else:
+            self.llm_client = OpenRouterClient()
+            app_logger.info("Using OpenRouter API")
         
+        # Initialize agents
         self.prakriti_agent = PrakritiAgent(self.retriever, self.llm_client)
         self.dosha_agent = DoshaAgent(self.retriever, self.llm_client)
         self.treatment_agent = TreatmentAgent(self.retriever, self.llm_client)
-        self.orchestrator = OrchestratorAgent(self.prakriti_agent, self.dosha_agent, self.treatment_agent, self.llm_client)
-    
-    def chat(self, message: str, history: list):
-        if not message.strip():
-            return "Please enter a question."
         
+        # Initialize orchestrator
+        self.orchestrator = OrchestratorAgent(
+            self.prakriti_agent,
+            self.dosha_agent,
+            self.treatment_agent,
+            self.llm_client
+        )
+        
+        app_logger.info("✓ AyurMind initialized successfully")
+    
+    # def chat(self, message: str, history: list):
+    #     if not message.strip():
+    #         return "Please enter a question."
+        
+    #     try:
+    #         response = self.orchestrator.simple_query(message)
+    #         return response
+    #     except Exception as e:
+    #         return f"Error: {str(e)}. Please try again."
+    def chat(self, message: str, history: list):
+        history = history or []
+
+        if not message.strip():
+            return history
+
         try:
+            # add user message
+            history.append({"role": "user", "content": message})
+
             response = self.orchestrator.simple_query(message)
-            return response
+
+            # add assistant message
+            history.append({"role": "assistant", "content": response})
+
+            return history
+
         except Exception as e:
-            return f"Error: {str(e)}. Please try again."
+            history.append({
+                "role": "assistant",
+                "content": f"Error: {str(e)}. Please try again."
+            })
+            return history
+
     
     def create_interface(self):
         with gr.Blocks(title="AyurMind") as interface:
