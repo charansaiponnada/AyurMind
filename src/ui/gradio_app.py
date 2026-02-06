@@ -100,8 +100,11 @@ class AyurMindApp:
 
             response = self.orchestrator.simple_query(message, history)
 
+            # Extract the final_response text from the dictionary
+            response_text = response.get('final_response', str(response))
+
             # add assistant message
-            history.append({"role": "assistant", "content": response})
+            history.append({"role": "assistant", "content": response_text})
 
             return history
 

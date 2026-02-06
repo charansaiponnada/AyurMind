@@ -1,0 +1,11 @@
+id,scenario,ground_truth_prakriti
+1,"I've been feeling very anxious and my skin is dry. I have trouble sleeping and my mind is always racing. What could be the reason?",Vata
+2,"I have a short temper and I often get acid reflux. I also have some skin rashes that are reddish. What should I do?",Pitta
+3,"I feel heavy and lethargic all the time, especially after meals. I've gained some weight recently and I have a bit of a cough.",Kapha
+4,"I have a mix of symptoms. My joints crack, I have dry skin, but I also get irritable and have acid reflux sometimes.",Vata-Pitta
+5,"I feel energetic but also a bit heavy. I have a good appetite but sometimes I feel nauseous after eating. My skin is oily but I also get rashes.",Pitta-Kapha
+6,"I'm generally calm, but I've been feeling anxious lately. My digestion is slow and I feel bloated.",Vata-Kapha
+7,"I feel completely out of balance. I have anxiety, heartburn, and I feel heavy and congested all at once. It's very confusing.",Tridosha
+8,"I have cracking joints and I feel cold most of the time. My hair is thin and dry. What kind of diet should I follow?",Vata
+9,"I'm a very competitive person and I sweat a lot. I have a strong appetite and I get angry when I'm hungry. What is my constitution?",Pitta
+10,"I am prone to getting colds and my sinuses are often congested. I have a calm and steady personality. What lifestyle changes should I make?",Kapha

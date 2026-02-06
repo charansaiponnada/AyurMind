@@ -40,16 +40,21 @@ class OrchestratorAgent:
         This is the "slow path" for complex Ayurvedic queries.
         """
         results = {}
+        retrieved_sources = []
         requested_source = self._extract_requested_sources(query)
         
         if agent_activation['prakriti']:
             prakriti_result = self.prakriti_agent.process(query, conversation_history=conversation_history)
             results['prakriti'] = prakriti_result['response']
-        
+            if 'sources' in prakriti_result:
+                retrieved_sources.extend(prakriti_result['sources'])
+
         if agent_activation['dosha']:
             additional_info = {'Prakriti Assessment': results['prakriti']} if 'prakriti' in results else {}
             dosha_result = self.dosha_agent.process(query, additional_info, conversation_history)
             results['dosha'] = dosha_result['response']
+            if 'sources' in dosha_result:
+                retrieved_sources.extend(dosha_result['sources'])
         
         if agent_activation['treatment']:
             additional_info = {}
@@ -62,10 +67,15 @@ class OrchestratorAgent:
             
             treatment_result = self.treatment_agent.process(query, additional_info, conversation_history)
             results['treatment'] = treatment_result['response']
+            if 'sources' in treatment_result:
+                retrieved_sources.extend(treatment_result['sources'])
+
+        # Remove duplicate sources based on 'id'
+        unique_sources = list({s['id']: s for s in retrieved_sources}.values())
         
         synthesized_response = self.synthesize_response(query, results, conversation_history)
         
-        return {'query': query, 'agent_responses': results, 'final_response': synthesized_response, 'agent_activation': agent_activation}
+        return {'query': query, 'agent_responses': results, 'final_response': synthesized_response, 'retrieved_sources': unique_sources, 'agent_activation': agent_activation}
     
     def synthesize_response(self, query: str, agent_results: Dict, conversation_history: List[Dict] = None) -> str:
         synthesis_context = "Agent Analyses:\n\n"
@@ -92,26 +102,25 @@ After silently verifying the above, produce ONLY the final, polished, and verifi
         
         return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200, conversation_history=conversation_history)
     
-    def simple_query(self, query: str, conversation_history: List[Dict] = None) -> str:
+    def simple_query(self, query: str, conversation_history: List[Dict] = None) -> Dict:
         """
         Analyzes the query and routes it to either the fast-path (general query)
-        or the slow-path (Ayurvedic query).
+        or the slow-path (Ayurvedic query). Returns the full result dictionary.
         """
         agent_activation = self.analyze_query(query)
         is_ayurvedic_query = any(agent_activation.values())
 
         if is_ayurvedic_query:
             # SLOW PATH: Use the full multi-agent process for Ayurvedic questions.
-            result = self.process_query(query, agent_activation, conversation_history)
-            return result['final_response']
+            return self.process_query(query, agent_activation, conversation_history)
         else:
             # FAST PATH: Bypass agents for a direct, quick answer to general questions.
             system_prompt = "You are a helpful general assistant. Provide a concise and direct answer. If you are asked about Ayurveda, gently state that you can answer those questions in more detail if the user asks a more specific question about symptoms, constitution, or treatments."
-            return self.llm_client.generate(
+            response = self.llm_client.generate(
                 prompt=query, 
                 system_prompt=system_prompt,
-                # Use a slightly higher temperature for more natural general conversation
                 temperature=0.4, 
                 max_tokens=1000,
                 conversation_history=conversation_history
             )
+            return {'query': query, 'final_response': response, 'retrieved_sources': [], 'agent_activation': agent_activation}

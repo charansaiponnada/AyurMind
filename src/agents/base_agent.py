@@ -18,13 +18,24 @@ class BaseAgent(ABC):
     def get_category_filter(self) -> Optional[str]:
         pass
     
-    def retrieve_context(self, query: str, n_results: int = 5) -> str:
+    def retrieve_context_and_sources(self, query: str, n_results: int = 5) -> (str, list):
         category_filter = self.get_category_filter()
-        return self.rag_retriever.build_context(query=query, n_results=n_results, category_filter=category_filter, include_metadata=True)
-    
+        chunks = self.rag_retriever.retrieve(query=query, n_results=n_results, category_filter=category_filter)
+        
+        context_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            metadata = chunk.get('metadata', {})
+            source = f"[Source: {metadata.get('section', 'Unknown')} - {metadata.get('chapter', 'Unknown')}]"
+            context_parts.append(f"--- Context {i} {source} ---")
+            context_parts.append(chunk.get('text', ''))
+            context_parts.append("")
+        
+        context_str = "\n".join(context_parts)
+        return context_str, chunks
+
     def generate_response(self, query: str, context: str = None, additional_info: Dict = None, conversation_history: list = None) -> str:
         if context is None:
-            context = self.retrieve_context(query)
+            context, _ = self.retrieve_context_and_sources(query)
         
         if additional_info:
             info_str = "\n".join([f"{key}: {value}" for key, value in additional_info.items()])
@@ -39,6 +50,6 @@ class BaseAgent(ABC):
         )
     
     def process(self, query: str, additional_info: Dict = None, conversation_history: list = None) -> Dict:
-        context = self.retrieve_context(query)
+        context, sources = self.retrieve_context_and_sources(query)
         response = self.generate_response(query, context, additional_info, conversation_history)
-        return {'agent': self.name, 'response': response, 'context': context, 'query': query}
+        return {'agent': self.name, 'response': response, 'sources': sources, 'query': query}
