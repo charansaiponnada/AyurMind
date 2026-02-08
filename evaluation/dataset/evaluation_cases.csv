@@ -1,11 +1,41 @@
-id,scenario,ground_truth_prakriti
-1,"I've been feeling very anxious and my skin is dry. I have trouble sleeping and my mind is always racing. What could be the reason?",Vata
-2,"I have a short temper and I often get acid reflux. I also have some skin rashes that are reddish. What should I do?",Pitta
-3,"I feel heavy and lethargic all the time, especially after meals. I've gained some weight recently and I have a bit of a cough.",Kapha
-4,"I have a mix of symptoms. My joints crack, I have dry skin, but I also get irritable and have acid reflux sometimes.",Vata-Pitta
-5,"I feel energetic but also a bit heavy. I have a good appetite but sometimes I feel nauseous after eating. My skin is oily but I also get rashes.",Pitta-Kapha
-6,"I'm generally calm, but I've been feeling anxious lately. My digestion is slow and I feel bloated.",Vata-Kapha
-7,"I feel completely out of balance. I have anxiety, heartburn, and I feel heavy and congested all at once. It's very confusing.",Tridosha
-8,"I have cracking joints and I feel cold most of the time. My hair is thin and dry. What kind of diet should I follow?",Vata
-9,"I'm a very competitive person and I sweat a lot. I have a strong appetite and I get angry when I'm hungry. What is my constitution?",Pitta
-10,"I am prone to getting colds and my sinuses are often congested. I have a calm and steady personality. What lifestyle changes should I make?",Kapha
+id,scenario,ground_truth_prakriti,complexity_level,query_type,expected_agents,notes
+1,"I've been feeling very anxious and my skin is dry. I have trouble sleeping and my mind is always racing. What could be the reason?",Vata,Simple,Diagnostic,prakriti+dosha,Basic Vata symptoms
+2,"I have a short temper and I often get acid reflux. I also have some skin rashes that are reddish. What should I do?",Pitta,Simple,Diagnostic+Treatment,prakriti+dosha+treatment,Basic Pitta symptoms
+3,"I feel heavy and lethargic all the time, especially after meals. I've gained some weight recently and I have a bit of a cough.",Kapha,Simple,Diagnostic,prakriti+dosha,Basic Kapha symptoms
+4,"I have a mix of symptoms. My joints crack, I have dry skin, but I also get irritable and have acid reflux sometimes.",Vata-Pitta,Medium,Diagnostic,prakriti+dosha,Dual dosha case
+5,"I feel energetic but also a bit heavy. I have a good appetite but sometimes I feel nauseous after eating. My skin is oily but I also get rashes.",Pitta-Kapha,Medium,Diagnostic,prakriti+dosha,Dual dosha case
+6,"I'm generally calm, but I've been feeling anxious lately. My digestion is slow and I feel bloated.",Vata-Kapha,Medium,Diagnostic,prakriti+dosha,Dual dosha with lifestyle change
+7,"I feel completely out of balance. I have anxiety, heartburn, and I feel heavy and congested all at once. It's very confusing.",Tridosha,Complex,Diagnostic,prakriti+dosha,Challenging multi-dosha case
+8,"I have cracking joints and I feel cold most of the time. My hair is thin and dry. What kind of diet should I follow?",Vata,Simple,Treatment,treatment,Diet-focused query
+9,"I'm a very competitive person and I sweat a lot. I have a strong appetite and I get angry when I'm hungry. What is my constitution?",Pitta,Simple,Prakriti,prakriti,Pure prakriti assessment
+10,"I am prone to getting colds and my sinuses are often congested. I have a calm and steady personality. What lifestyle changes should I make?",Kapha,Simple,Treatment,prakriti+treatment,Lifestyle modification query
+11,"What is Vata constitution and how do I know if I have it?",Unknown,Simple,Educational,prakriti,Knowledge query
+12,"I wake up at 3 AM every night with anxiety. My hands and feet are always cold. What Ayurvedic approach would help?",Vata,Medium,Diagnostic+Treatment,dosha+treatment,Sleep disorder with Vata aggravation
+13,"I get severe headaches when I skip meals. My body temperature always runs hot. What should I eat?",Pitta,Medium,Treatment,dosha+treatment,Diet for Pitta headaches
+14,"I have gained 15 kg in the last year. I feel unmotivated and sleep excessively. Help me lose weight the Ayurvedic way.",Kapha,Medium,Treatment,dosha+treatment,Weight management Kapha type
+15,"During winter, my joints ache more and my skin becomes very dry. What should I do?",Vata,Medium,Seasonal,dosha+treatment,Seasonal Vata aggravation
+16,"In summer, I get very irritable and develop skin inflammation. What dietary changes should I make?",Pitta,Medium,Seasonal,dosha+treatment,Seasonal Pitta aggravation
+17,"During the rainy season, I feel very heavy and get frequent colds. What precautions should I take?",Kapha,Medium,Seasonal,dosha+treatment,Seasonal Kapha aggravation
+18,"I am 45 years old and going through menopause. I have hot flashes, anxiety, and insomnia. What can Ayurveda offer?",Vata-Pitta,Complex,Life-stage+Treatment,dosha+treatment,Menopausal symptoms
+19,"My 8-year-old child is hyperactive, has difficulty concentrating, and is very thin. What foods are best for him?",Vata,Medium,Pediatric,prakriti+treatment,Children's health Vata type
+20,"I work night shifts and my digestion has become very poor. I have acidity and insomnia. What should I do?",Pitta-Vata,Complex,Lifestyle+Treatment,dosha+treatment,Occupational health issue
+21,"I practice intense exercise daily but feel exhausted rather than energized. I'm losing weight despite eating well.",Vata,Medium,Athletic,dosha+treatment,Over-exercise Vata depletion
+22,"I'm a student preparing for exams. I have anxiety, poor memory, and digestive issues from stress. Please help.",Vata-Pitta,Medium,Mental health,dosha+treatment,Stress-related imbalance
+23,"I have chronic constipation, lower back pain, and feel very restless. What herbs would help?",Vata,Medium,Treatment,dosha+treatment,Specific herbal query
+24,"I have burning sensation in stomach, acid reflux, and bad temper. Which Ayurvedic treatment is suitable?",Pitta,Medium,Treatment,dosha+treatment,Pitta digestive disorder
+25,"I have excess mucus, sinus congestion, and feel very dull mentally. What can clear this?",Kapha,Medium,Treatment,dosha+treatment,Kapha respiratory issue
+26,"I'm vegetarian and feel weak and cold all the time. Am I doing something wrong with my diet?",Vata,Medium,Dietary,prakriti+treatment,Vegetarian diet assessment
+27,"I crave spicy and sour foods but they seem to make my heartburn worse. Why is this happening?",Pitta,Simple,Dietary+Educational,dosha+treatment,Food cravings and aggravation
+28,"I tend to overeat comfort foods and have trouble controlling my weight. What's the Ayurvedic explanation?",Kapha,Simple,Dietary,prakriti+treatment,Emotional eating Kapha type
+29,"My tongue has a thick white coating, I have bad breath, and feel sluggish. What does this mean?",Kapha,Medium,Diagnostic,dosha,Tongue diagnosis
+30,"I have a very variable appetite - sometimes very hungry, sometimes no appetite at all. Why?",Vata,Simple,Diagnostic,dosha,Vata irregular digestion
+31,"What is the difference between Prakriti and Vikriti? I'm confused about my constitution.",Unknown,Simple,Educational,prakriti,Conceptual understanding
+32,"Can you explain the role of Agni (digestive fire) in Ayurveda and how to strengthen it?",Unknown,Simple,Educational,treatment,Educational query on concepts
+33,"I'm planning to start Panchakarma. What should I know before beginning this treatment?",Unknown,Medium,Treatment,treatment,Panchakarma preparation query
+34,"I have diabetes and high blood pressure. Can Ayurveda help alongside my regular medications?",Multiple,Complex,Medical condition,dosha+treatment,Chronic disease management
+35,"I experienced trauma 6 months ago and since then have anxiety, nightmares, and digestive problems.",Vata,Complex,Mental health,dosha+treatment,Post-traumatic stress
+36,"I'm pregnant (second trimester) and have heartburn and swollen feet. What's safe to take?",Pitta-Kapha,Complex,Pregnancy,dosha+treatment,Pregnancy-related query
+37,"I'm 65 years old and have joint pain, weak digestion, and poor sleep. What's appropriate for my age?",Vata,Medium,Geriatric,dosha+treatment,Elderly patient care
+38,"I travel frequently for work across time zones. I have jet lag, anxiety, and digestive upset. Help!",Vata,Medium,Travel-related,dosha+treatment,Travel health management
+39,"I do yoga daily but still feel unbalanced. Am I doing the wrong type of yoga for my constitution?",Unknown,Medium,Lifestyle,prakriti+treatment,Yoga and constitution
+40,"I've been taking the same herbs for 3 months but don't see improvement. What could be wrong?",Unknown,Complex,Treatment review,treatment,Treatment not working
