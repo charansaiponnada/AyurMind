@@ -148,8 +148,11 @@ class AyurMindApp:
         if server_port is None:
             server_port = int(os.getenv("GRADIO_PORT", "7860"))
         
+        # Use 0.0.0.0 when sharing so the public link works
+        server_name = "0.0.0.0" if share else "127.0.0.1"
+        
         interface = self.create_interface()
-        interface.launch(share=share, server_port=server_port, server_name="127.0.0.1")
+        interface.launch(share=share, server_port=server_port, server_name=server_name)
 
 def main():
     app = AyurMindApp()
