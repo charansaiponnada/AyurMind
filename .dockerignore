@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Logs
+logs/
+*.log
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Data (can be large - build on container startup if needed)
+# Uncomment if you want to build vectordb inside container:
+# data/vectordb/
+# data/processed/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Notebooks
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# Evaluation
+evaluation/
+
+# Misc
+*.bak
+*.tmp
+.cache/

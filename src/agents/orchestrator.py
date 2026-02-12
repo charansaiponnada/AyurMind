@@ -43,29 +43,35 @@ class OrchestratorAgent:
         retrieved_sources = []
         requested_source = self._extract_requested_sources(query)
         
+        
+        # Prepare common additional info for all agents, including the source filter if present
+        base_additional_info = {}
+        if requested_source:
+            base_additional_info['source_filter'] = requested_source
+        
         if agent_activation['prakriti']:
-            prakriti_result = self.prakriti_agent.process(query, conversation_history=conversation_history)
+            prakriti_result = self.prakriti_agent.process(query, base_additional_info.copy(), conversation_history=conversation_history)
             results['prakriti'] = prakriti_result['response']
             if 'sources' in prakriti_result:
                 retrieved_sources.extend(prakriti_result['sources'])
 
         if agent_activation['dosha']:
-            additional_info = {'Prakriti Assessment': results['prakriti']} if 'prakriti' in results else {}
-            dosha_result = self.dosha_agent.process(query, additional_info, conversation_history)
+            dosha_additional_info = base_additional_info.copy()
+            if 'prakriti' in results:
+                dosha_additional_info['Prakriti Assessment'] = results['prakriti']
+            dosha_result = self.dosha_agent.process(query, dosha_additional_info, conversation_history)
             results['dosha'] = dosha_result['response']
             if 'sources' in dosha_result:
                 retrieved_sources.extend(dosha_result['sources'])
         
         if agent_activation['treatment']:
-            additional_info = {}
+            treatment_additional_info = base_additional_info.copy()
             if 'prakriti' in results:
-                additional_info['Prakriti'] = results['prakriti']
+                treatment_additional_info['Prakriti'] = results['prakriti']
             if 'dosha' in results:
-                additional_info['Dosha Imbalance'] = results['dosha']
-            if requested_source:
-                additional_info['Requested Source'] = requested_source
+                treatment_additional_info['Dosha Imbalance'] = results['dosha']
             
-            treatment_result = self.treatment_agent.process(query, additional_info, conversation_history)
+            treatment_result = self.treatment_agent.process(query, treatment_additional_info, conversation_history)
             results['treatment'] = treatment_result['response']
             if 'sources' in treatment_result:
                 retrieved_sources.extend(treatment_result['sources'])
@@ -73,11 +79,11 @@ class OrchestratorAgent:
         # Remove duplicate sources based on 'id'
         unique_sources = list({s['id']: s for s in retrieved_sources}.values())
         
-        synthesized_response = self.synthesize_response(query, results, conversation_history)
+        synthesized_response = self.synthesize_response(query, results, unique_sources, conversation_history)
         
         return {'query': query, 'agent_responses': results, 'final_response': synthesized_response, 'retrieved_sources': unique_sources, 'agent_activation': agent_activation}
     
-    def synthesize_response(self, query: str, agent_results: Dict, conversation_history: List[Dict] = None) -> str:
+    def synthesize_response(self, query: str, agent_results: Dict, retrieved_sources: List[Dict], conversation_history: List[Dict] = None) -> str:
         synthesis_context = "Agent Analyses:\n\n"
         
         if 'prakriti' in agent_results:
@@ -86,8 +92,20 @@ class OrchestratorAgent:
             synthesis_context += f"IMBALANCE ANALYSIS:\n{agent_results['dosha']}\n\n"
         if 'treatment' in agent_results:
             synthesis_context += f"TREATMENT RECOMMENDATIONS:\n{agent_results['treatment']}\n\n"
-        
-        system_prompt = """You are the head consultant at an Ayurvedic clinic. Your task is to synthesize the analyses from your junior agents into a single, cohesive, and accurate report for the client.
+
+        # Format sources for the prompt
+        source_context = "The following sources from Ayurvedic texts were consulted by the agents:\n"
+        for i, source in enumerate(retrieved_sources, 1):
+            metadata = source.get('metadata', {})
+            source_ref = f"{metadata.get('section', 'Unknown Section')} - {metadata.get('chapter', 'Unknown Chapter')}"
+            source_context += f"- Source {i}: {source_ref}\n"
+
+        system_prompt = """You are the head consultant at an Ayurvedic clinic, renowned for your deep knowledge and impactful advice. Your task is to synthesize the analyses from your junior agents into a single, cohesive, and authoritative report for the client.
+
+**STYLE AND TONE:**
+- **Authoritative & Suggestive:** Frame your advice as strong, expert suggestions, not passive observations. Use phrases like "I recommend...", "It would be beneficial to...", "A crucial step is...".
+- **Empathetic & Professional:** Address the client with care, but maintain a professional distance.
+- **Action-Oriented:** Focus on providing clear, actionable steps the client can take.
 
 **BACKGROUND INSTRUCTIONS (DO NOT print these in the output):**
 Before writing the report, you MUST silently verify the following:
@@ -96,11 +114,21 @@ Before writing the report, you MUST silently verify the following:
 3.  **Safety**: Ensure that advanced procedures like Vamana are explicitly marked as requiring professional supervision, with no home dosages provided.
 
 **TASK:**
-After silently verifying the above, produce ONLY the final, polished, and verified consultation report for the client. Start the report with "Dear [Client]," and do not include any of your internal checklist or verification steps."""
+After silently verifying the above, produce ONLY the final, polished, and verified consultation report for the client.
+- Start the report with "Dear [Client]," and do not include any of your internal checklist or verification steps.
+- **Cite Your Sources:** Where appropriate, make your response more impactful by referencing the texts consulted. For example, instead of "Eat light foods," you could say, "In line with the principles from the Charaka Samhita, I recommend focusing on light, easily digestible foods." You can refer to the provided source list. Do not make up sources.
+- **Structure:** Present the information in a clear, well-structured manner. Use headings or bullet points where helpful.
+"""
         
-        synthesis_prompt = f"""The following are the analyses from your junior agents based on the user's query.\n\n{synthesis_context}\n\nPlease perform your final review as instructed and then synthesize these into a single, cohesive, and accurate consultation response for the client."""
+        synthesis_prompt = f"""The following are the analyses from your junior agents and the sources they consulted.
+
+{synthesis_context}
+
+{source_context}
+
+Please perform your final review as instructed and then synthesize these into a single, cohesive, and impactful consultation response for the client."""
         
-        return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=1200, conversation_history=conversation_history)
+        return self.llm_client.generate(prompt=synthesis_prompt, system_prompt=system_prompt, temperature=self.temperature, max_tokens=4000, conversation_history=conversation_history)
     
     def simple_query(self, query: str, conversation_history: List[Dict] = None) -> Dict:
         """
@@ -120,7 +148,7 @@ After silently verifying the above, produce ONLY the final, polished, and verifi
                 prompt=query, 
                 system_prompt=system_prompt,
                 temperature=0.4, 
-                max_tokens=1000,
+                max_tokens=2000,
                 conversation_history=conversation_history
             )
             return {'query': query, 'final_response': response, 'retrieved_sources': [], 'agent_activation': agent_activation}

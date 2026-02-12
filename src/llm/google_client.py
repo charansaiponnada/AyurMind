@@ -88,7 +88,7 @@ class GoogleClient:
         return formatted_history
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None, 
-                 temperature: float = 0.5, max_tokens: int = 2048, 
+                 temperature: float = 0.5, max_tokens: int = 4000, 
                  conversation_history: Optional[List[Dict]] = None, **kwargs) -> str:
         """
         Generate response from Gemini model using the stateless generate_content method.
@@ -152,7 +152,7 @@ class GoogleClient:
 
     def generate_with_context(self, query: str, context: str, 
                              system_prompt: str, temperature: float = 0.3, 
-                             max_tokens: int = 2048, 
+                             max_tokens: int = 4000, 
                              conversation_history: Optional[List[Dict]] = None) -> str:
         """
         Generate response with RAG (Retrieval Augmented Generation) context.

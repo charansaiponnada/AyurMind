@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Optional
 
 class BaseAgent(ABC):
-    def __init__(self, name: str, rag_retriever, llm_client, temperature: float = 0.3, max_tokens: int = 800):
+    def __init__(self, name: str, rag_retriever, llm_client, temperature: float = 0.3, max_tokens: int = 3000):
         self.name = name
         self.rag_retriever = rag_retriever
         self.llm_client = llm_client
@@ -18,9 +18,9 @@ class BaseAgent(ABC):
     def get_category_filter(self) -> Optional[str]:
         pass
     
-    def retrieve_context_and_sources(self, query: str, n_results: int = 5) -> (str, list):
+    def retrieve_context_and_sources(self, query: str, n_results: int = 5, source_filter: Optional[str] = None) -> (str, list):
         category_filter = self.get_category_filter()
-        chunks = self.rag_retriever.retrieve(query=query, n_results=n_results, category_filter=category_filter)
+        chunks = self.rag_retriever.retrieve(query=query, n_results=n_results, category_filter=category_filter, source_filter=source_filter)
         
         context_parts = []
         for i, chunk in enumerate(chunks, 1):
@@ -35,10 +35,17 @@ class BaseAgent(ABC):
 
     def generate_response(self, query: str, context: str = None, additional_info: Dict = None, conversation_history: list = None) -> str:
         if context is None:
-            context, _ = self.retrieve_context_and_sources(query)
+            # If context is not explicitly provided, retrieve it
+            # Extract source_filter if available in additional_info
+            _source_filter = additional_info.get('source_filter') if additional_info else None
+            context, _ = self.retrieve_context_and_sources(query, source_filter=_source_filter)
         
-        if additional_info:
-            info_str = "\n".join([f"{key}: {value}" for key, value in additional_info.items()])
+        # Ensure 'source_filter' is not included in the LLM's additional_info if it's only for retrieval
+        llm_additional_info = additional_info.copy() if additional_info else {}
+        llm_additional_info.pop('source_filter', None) 
+        
+        if llm_additional_info:
+            info_str = "\n".join([f"{key}: {value}" for key, value in llm_additional_info.items()])
             enhanced_query = f"{query}\n\nAdditional Information:\n{info_str}"
         else:
             enhanced_query = query
@@ -50,6 +57,7 @@ class BaseAgent(ABC):
         )
     
     def process(self, query: str, additional_info: Dict = None, conversation_history: list = None) -> Dict:
-        context, sources = self.retrieve_context_and_sources(query)
+        source_filter = additional_info.get('source_filter') if additional_info else None
+        context, sources = self.retrieve_context_and_sources(query, source_filter=source_filter)
         response = self.generate_response(query, context, additional_info, conversation_history)
         return {'agent': self.name, 'response': response, 'sources': sources, 'query': query}

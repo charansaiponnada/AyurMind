@@ -16,6 +16,7 @@ class OllamaClient:
     
     def __init__(self, model: str = None, base_url: str = "http://localhost:11434"):
         self.model = model or os.getenv("LOCAL_MODEL", "llama3.2:3b")
+        self.model_name = self.model # Expose model as model_name for consistency
         self.base_url = base_url
         
         logger.info(f"Initializing Ollama client with model: {self.model}")

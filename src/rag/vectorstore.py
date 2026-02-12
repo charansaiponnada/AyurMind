@@ -29,8 +29,23 @@ class AyurvedicVectorStore:
             
             self.collection.add(ids=ids, documents=documents, embeddings=batch_embeddings, metadatas=metadatas)
     
-    def search(self, query_embedding: List[float], n_results: int = 5, category_filter: Optional[str] = None) -> Dict:
-        where_clause = {"category": category_filter} if category_filter else None
+    def search(self, query_embedding: List[float], n_results: int = 5, category_filter: Optional[str] = None, source_filter: Optional[str] = None) -> Dict:
+        where_conditions = []
+        if category_filter:
+            where_conditions.append({"category": category_filter})
+        
+        if source_filter:
+            # Match source_filter against 'section' or 'chapter' metadata fields
+            # Assuming source_filter will be an exact match to a section/chapter name
+            where_conditions.append({"$or": [{"section": source_filter}, {"chapter": source_filter}]})
+        
+        where_clause = None
+        if where_conditions:
+            if len(where_conditions) == 1:
+                where_clause = where_conditions[0]
+            else:
+                where_clause = {"$and": where_conditions}
+                
         return self.collection.query(query_embeddings=[query_embedding], n_results=n_results, where=where_clause)
     
     def get_stats(self) -> Dict:

@@ -21,17 +21,47 @@ from src.rag.retriever import RAGRetriever
 # --- Model Placeholder Functions ---
 # In a real scenario, these would import and call the actual model inference functions.
 
-def run_vanilla_llm(scenario):
+def run_vanilla_llm(scenario, llm_client):
     """
-    Placeholder for the vanilla LLM.
-    Returns a generic, non-RAG response.
+    Instantiates a simple LLM client to generate a response based on the scenario.
+    Provides a more informative, Ayurvedic-oriented response with a safety disclaimer.
     """
-    # This function remains a placeholder for comparison.
-    # In a real system, you might instantiate a simple LLM client here.
+    system_prompt = (
+        "You are an assistant knowledgeable in general Ayurvedic principles. "
+        "Based on the user's symptoms, you can explain general Ayurvedic concepts "
+        "or suggest potential dosha imbalances. Always include a disclaimer "
+        "that this information is for educational purposes only and not a substitute "
+        "for professional medical advice or diagnosis from a qualified Ayurvedic practitioner."
+    )
+    
+    response = llm_client.generate(
+        prompt=scenario,
+        system_prompt=system_prompt,
+        temperature=0.3,
+        max_tokens=500
+    )
+
+    prakriti = "Unknown"
+    response_lower = response.lower()
+    if "vata-pitta" in response_lower or "pitta-vata" in response_lower:
+        prakriti = "Vata-Pitta"
+    elif "pitta-kapha" in response_lower or "kapha-pitta" in response_lower:
+        prakriti = "Pitta-Kapha"
+    elif "vata-kapha" in response_lower or "kapha-vata" in response_lower:
+        prakriti = "Vata-Kapha"
+    elif "tridosha" in response_lower:
+        prakriti = "Tridosha"
+    elif "vata" in response_lower:
+        prakriti = "Vata"
+    elif "pitta" in response_lower:
+        prakriti = "Pitta"
+    elif "kapha" in response_lower:
+        prakriti = "Kapha"
+
     return {
-        "response": f"As a large language model, I can provide some general information. Based on your symptoms like '{scenario[:30]}...', it could be related to stress or diet. It is always best to consult a doctor.",
-        "prakriti": "Unknown",
-        "sources": []
+        "response": response,
+        "prakriti": prakriti,
+        "sources": [] # Still no explicit sources for vanilla LLM
     }
 
 def run_single_agent_rag(scenario, rag_retriever, llm_client):
@@ -135,9 +165,7 @@ def run_evaluation():
     print("Initialization complete.")
     
     models = {
-        "vanilla_llm": run_vanilla_llm,
-        "single_agent_rag": lambda s: run_single_agent_rag(s, rag_retriever, llm_client),
-        "ayurmind": lambda s: run_ayurmind(s, orchestrator)
+        "vanilla_llm": lambda s: run_vanilla_llm(s, llm_client)
     }
 
     # Clear previous results files

@@ -24,6 +24,7 @@ from src.rag.vectorstore import AyurvedicVectorStore
 from src.rag.retriever import RAGRetriever
 from src.llm.google_client import GoogleClient
 from src.llm.openai_client import OpenAIClient
+from src.llm.local_client import OllamaClient # Import OllamaClient
 from src.agents.prakriti_agent import PrakritiAgent
 from src.agents.dosha_agent import DoshaAgent
 from src.agents.treatment_agent import TreatmentAgent
@@ -44,18 +45,26 @@ class AyurMindApp:
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        # Initialize LLM client - with OpenAI preference and Google fallback
+        # Initialize LLM client - with Local preference, then OpenAI, then Google fallback
         self.llm_client = None
+        use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
         use_openai = os.getenv("USE_OPENAI", "false").lower() == "true"
 
-        if use_openai:
+        if use_local_llm:
+            try:
+                self.llm_client = OllamaClient()
+                app_logger.info(f"✅ Using Local client with model: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.warning(f"Local LLM Client failed to initialize: {e}. Falling back to other clients.")
+
+        if self.llm_client is None and use_openai:
             try:
                 self.llm_client = OpenAIClient()
                 app_logger.info(f"✅ Using OpenAI client with model: {self.llm_client.model_name}")
             except Exception as e:
                 app_logger.warning(f"OpenAI Client failed to initialize: {e}. Falling back to Google Client.")
 
-        if self.llm_client is None: # If OpenAI wasn't chosen or failed
+        if self.llm_client is None: # If no other client was chosen or failed
             try:
                 self.llm_client = GoogleClient()
                 app_logger.info(f"✅ Using Google client with model: {self.llm_client.model_name}")
@@ -136,7 +145,7 @@ class AyurMindApp:
             )
             
             msg.submit(self.chat, [msg, chatbot], [chatbot])
-            submit.click(self.chat, [msg, chatbot], [chatbot])
+            submit.click(self.chat, [msg, chatbot], [chatbot]).then(lambda: "", None, [msg])
             msg.submit(lambda: "", None, [msg])
             clear.click(lambda: None, None, [chatbot])
         
