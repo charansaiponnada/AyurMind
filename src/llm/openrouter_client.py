@@ -1,13 +1,13 @@
 """
-OpenRouter API Client - Free LLM access (FIXED)
+OpenRouter API Client
 
-Uses OpenRouter's free tier models for RAG-based generation.
-Get free API key: https://openrouter.ai/keys
+Uses OpenRouter's models for RAG-based generation.
+Get API key: https://openrouter.ai/keys
 """
 
 import os
 import requests
-from typing import Optional
+from typing import Optional, List, Dict
 
 class OpenRouterClient:
     """Client for OpenRouter API"""
@@ -16,27 +16,35 @@ class OpenRouterClient:
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not self.api_key:
             raise ValueError(
-                "OpenRouter API key required! "
-                "Set OPENROUTER_API_KEY in .env or pass to constructor. "
-                "Get free key at: https://openrouter.ai/keys"
+                "OpenRouter API key not found. "
+                "Please set the OPENROUTER_API_KEY environment variable in a .env file. "
+                "You can get a free key at: https://openrouter.ai/keys"
             )
         
-        self.model = model or os.getenv("DEFAULT_MODEL", "meta-llama/llama-3.2-3b-instruct:free")
+        self.model = model or os.getenv("DEFAULT_MODEL", "mistralai/mistral-7b-instruct:free")
         self.base_url = base_url
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/ayurmind",
-            "X-Title": "AyurMind"
+            "HTTP-Referer": "https://github.com/charansaiponnada/AyurMind", # Required by OpenRouter for free models
+            "X-Title": "AyurMind" # Required by OpenRouter
         }
     
-    def generate(self, prompt: str, system_prompt: Optional[str] = None, temperature: float = 0.3, max_tokens: int = 800, **kwargs) -> str:
-        """Generate response from LLM"""
-        messages = []
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, 
+                 temperature: float = 0.3, max_tokens: int = 1500, 
+                 conversation_history: Optional[List[Dict]] = None, **kwargs) -> str:
+        """Generate response from LLM using OpenRouter's chat completions endpoint."""
         
+        messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         
+        if conversation_history:
+            # Add all but the last user message from history
+            for turn in conversation_history[:-1]:
+                messages.append(turn)
+        
+        # Add the current user prompt
         messages.append({"role": "user", "content": prompt})
         
         payload = {
@@ -52,18 +60,31 @@ class OpenRouterClient:
                 f"{self.base_url}/chat/completions",
                 headers=self.headers,
                 json=payload,
-                timeout=60
+                timeout=180  # 3 minute timeout
             )
-            response.raise_for_status()
+            response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
             
             result = response.json()
             return result['choices'][0]['message']['content']
             
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise RuntimeError("OpenRouter API Error: Invalid API Key. Please check your OPENROUTER_API_KEY.")
+            elif status_code == 402:
+                raise RuntimeError("OpenRouter API Error: You have exceeded your free tier limit or credits.")
+            elif status_code == 404:
+                raise RuntimeError(f"OpenRouter API Error: Model '{self.model}' not found. Please check the model name.")
+            else:
+                raise RuntimeError(f"OpenRouter API Error: Received status code {status_code}. Response: {e.response.text}")
+        except requests.exceptions.Timeout:
+            raise RuntimeError("OpenRouter API Error: The request timed out. The model may be taking too long to respond.")
         except requests.exceptions.RequestException as e:
-            print(f"OpenRouter API error: {e}")
-            raise
+            raise RuntimeError(f"OpenRouter API Error: A network error occurred: {e}")
     
-    def generate_with_context(self, query: str, context: str, system_prompt: str, temperature: float = 0.3, max_tokens: int = 800) -> str:
+    def generate_with_context(self, query: str, context: str, 
+                             system_prompt: str, temperature: float = 0.3, 
+                             max_tokens: int = 1500, conversation_history: Optional[List[Dict]] = None) -> str:
         """Generate response with RAG context"""
         prompt = f"""Context from Ayurvedic texts:
 
@@ -79,5 +100,6 @@ Based on the context provided above, please provide a response."""
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
+            conversation_history=conversation_history
         )

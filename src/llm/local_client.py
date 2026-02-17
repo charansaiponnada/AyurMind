@@ -16,6 +16,7 @@ class OllamaClient:
     
     def __init__(self, model: str = None, base_url: str = "http://localhost:11434"):
         self.model = model or os.getenv("LOCAL_MODEL", "llama3.2:3b")
+        self.model_name = self.model # Expose model as model_name for consistency
         self.base_url = base_url
         
         logger.info(f"Initializing Ollama client with model: {self.model}")
@@ -37,7 +38,7 @@ class OllamaClient:
             return False
     
     def generate(self, prompt: str, system_prompt: Optional[str] = None, 
-                 temperature: float = 0.3, **kwargs) -> str:
+                 temperature: float = 0.3, conversation_history: Optional[list] = None, **kwargs) -> str:
         """Generate response from local LLM
         
         Note: max_tokens is ignored for Ollama (not supported)
@@ -52,12 +53,24 @@ class OllamaClient:
                 "It should be running automatically. Check with: ollama list"
             )
         
-        # Build the complete prompt
-        if system_prompt:
-            full_prompt = f"{system_prompt}\n\n{prompt}"
-        else:
-            full_prompt = prompt
+        # Format conversation history
+        history_str = ""
+        if conversation_history:
+            # We take all but the last message, which is the current user query being processed
+            for turn in conversation_history[:-1]: 
+                if turn['role'] == 'user':
+                    history_str += f"User: {turn['content']}\n"
+                elif turn['role'] == 'assistant':
+                    history_str += f"Assistant: {turn['content']}\n"
         
+        # Build the complete prompt
+        full_prompt = ""
+        if system_prompt:
+            full_prompt += f"{system_prompt}\n\n"
+        if history_str:
+            full_prompt += f"Previous conversation:\n{history_str}\n"
+        full_prompt += f"Current query: {prompt}"
+
         payload = {
             "model": self.model,
             "prompt": full_prompt,
@@ -82,7 +95,7 @@ class OllamaClient:
             generated = result.get('response', '')
             
             logger.info(f"✓ Generated {len(generated)} characters")
-            return generated
+            return generated.strip()
             
         except requests.exceptions.Timeout:
             raise RuntimeError("Ollama generation timed out. Try a smaller model.")
@@ -93,7 +106,7 @@ class OllamaClient:
     
     def generate_with_context(self, query: str, context: str, 
                              system_prompt: str, temperature: float = 0.3,
-                             **kwargs) -> str:
+                             conversation_history: Optional[list] = None, **kwargs) -> str:
         """Generate response with RAG context
         
         Note: max_tokens is ignored for Ollama (not supported)
@@ -116,5 +129,6 @@ Based on the context provided above, please provide a response."""
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=temperature,
+            conversation_history=conversation_history,
             **kwargs
         )

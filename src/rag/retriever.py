@@ -10,12 +10,12 @@ class RAGRetriever:
         self.embedding_generator = embedding_generator or EmbeddingGenerator()
         self.max_chunks = int(os.getenv("MAX_CHUNKS_PER_QUERY", "5"))
     
-    def retrieve(self, query: str, n_results: int = None, category_filter: Optional[str] = None) -> List[Dict]:
+    def retrieve(self, query: str, n_results: int = None, category_filter: Optional[str] = None, source_filter: Optional[str] = None) -> List[Dict]:
         if n_results is None:
             n_results = self.max_chunks
         
         query_embedding = self.embedding_generator.embed_text(query)
-        results = self.vectorstore.search(query_embedding=query_embedding.tolist(), n_results=n_results, category_filter=category_filter)
+        results = self.vectorstore.search(query_embedding=query_embedding.tolist(), n_results=n_results, category_filter=category_filter, source_filter=source_filter)
         
         retrieved_chunks = []
         for i in range(len(results['ids'][0])):

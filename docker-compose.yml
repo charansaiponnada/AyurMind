@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ayurmind:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ayurmind
+    ports:
+      - "7860:7860"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - USE_OPENAI=${USE_OPENAI:-false}
+      - GRADIO_SHARE=${GRADIO_SHARE:-false}
+      - GRADIO_PORT=7860
+    volumes:
+      # Mount data directory to persist vector database
+      - ./data:/app/data
+      # Mount logs directory
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

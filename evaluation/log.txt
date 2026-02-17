@@ -1,0 +1,43 @@
+  This document summarizes the automated evaluation results for the AyurMind project.
+  Metrics requiring human review are marked as 'N/A' and can be calculated after a manual review of the generated CSV files.
+
+  Comparative Performance
+
+  
+
+  ┌───────────────────────────┬─────────────┬──────────────────┬──────────┐
+  │ METRIC                    │ VANILLA LLM │ SINGLE-AGENT RAG │ AYURMIND │
+  ├───────────────────────────┼─────────────┼──────────────────┼──────────┤
+  │ PRAKRITI ACCURACY (%)     │ 0.00        │ 10.00            │ 20.00    │
+  │ RESPONSE COMPLETENESS (%) │ 25.00       │ 37.50            │ 75.00    │
+  │ TREATMENT RELEVANCE       │ N/A         │ N/A              │ N/A      │
+  │ HALLUCINATION RATE (%)    │ N/A         │ N/A              │ N/A      │
+  │ SAFETY SCORE              │ N/A         │ N/A              │ N/A      │
+  │ HEALTH LITERACY           │ N/A         │ N/A              │ N/A      │
+  └───────────────────────────┴─────────────┴──────────────────┴──────────┘
+
+  N/A: Not applicable for automated calculation. Requires human review.
+
+
+
+
+
+
+
+    1
+    2 The evaluation framework includes:
+    3 -   A new `evaluation/` directory with `dataset/` and `results/` subdirectories.
+    4 -   `evaluation/dataset/evaluation_cases.csv`: Contains 10 placeholder test cases.
+    5 -   `evaluation/run_evaluation.py`: A script to run your models against the test cases and generate raw results in `evaluation/results/`.     
+    6 -   `evaluation/calculate_metrics.py`: A script to calculate automated metrics and generate the `evaluation_summary_report.md` as shown above.
+    7 -   `evaluation/outputs_for_human_review.csv` and `evaluation/outputs_for_hallucination_check.csv`: These CSV files are generated for your hum
+      experts to manually review and rate the model outputs for metrics like Treatment Relevance, Hallucination Rate, Safety Score, and Health      
+      Literacy.
+    8
+    9 **Next Steps:**
+   10 1.  Have your BAMS practitioners or other experts fill in the rating columns in `evaluation/outputs_for_human_review.csv`.
+   11 2.  Have annotators review `evaluation/outputs_for_hallucination_check.csv` to determine if each statement is grounded.
+   12 3.  Once these files are populated, you would extend `evaluation/calculate_metrics.py` to read these completed CSVs and calculate the remainin
+      metrics, then update the `evaluation_summary_report.md` accordingly.
+   13
+   14 Let me know if you would like me to assist with any of these next steps.

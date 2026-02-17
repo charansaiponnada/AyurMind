@@ -22,8 +22,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.rag.embeddings import EmbeddingGenerator
 from src.rag.vectorstore import AyurvedicVectorStore
 from src.rag.retriever import RAGRetriever
-from src.llm.openrouter_client import OpenRouterClient
-from src.llm.local_client import OllamaClient
+from src.llm.google_client import GoogleClient
+from src.llm.openai_client import OpenAIClient
+from src.llm.local_client import OllamaClient # Import OllamaClient
 from src.agents.prakriti_agent import PrakritiAgent
 from src.agents.dosha_agent import DoshaAgent
 from src.agents.treatment_agent import TreatmentAgent
@@ -44,22 +45,33 @@ class AyurMindApp:
         self.embedding_generator = EmbeddingGenerator()
         self.retriever = RAGRetriever(self.vectorstore, self.embedding_generator)
         
-        # Initialize LLM client - try local first
-        use_local = os.getenv("USE_LOCAL_FALLBACK", "true").lower() == "true"
-        
-        if use_local:
+        # Initialize LLM client - with Local preference, then OpenAI, then Google fallback
+        self.llm_client = None
+        use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+        use_openai = os.getenv("USE_OPENAI", "false").lower() == "true"
+
+        if use_local_llm:
             try:
                 self.llm_client = OllamaClient()
-                if not self.llm_client.is_available():
-                    raise Exception("Ollama not running")
-                app_logger.info("✅ Using Local Ollama (free, unlimited)")
+                app_logger.info(f"✅ Using Local client with model: {self.llm_client.model_name}")
             except Exception as e:
-                app_logger.warning(f"Ollama unavailable: {e}")
-                app_logger.info("Falling back to OpenRouter API")
-                self.llm_client = OpenRouterClient()
-        else:
-            self.llm_client = OpenRouterClient()
-            app_logger.info("Using OpenRouter API")
+                app_logger.warning(f"Local LLM Client failed to initialize: {e}. Falling back to other clients.")
+
+        if self.llm_client is None and use_openai:
+            try:
+                self.llm_client = OpenAIClient()
+                app_logger.info(f"✅ Using OpenAI client with model: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.warning(f"OpenAI Client failed to initialize: {e}. Falling back to Google Client.")
+
+        if self.llm_client is None: # If no other client was chosen or failed
+            try:
+                self.llm_client = GoogleClient()
+                app_logger.info(f"✅ Using Google client with model: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.error(f"Failed to initialize GoogleClient: {e}. No LLM client available.")
+                raise e # Critical failure if no client can be initialized
+        
         
         # Initialize agents
         self.prakriti_agent = PrakritiAgent(self.retriever, self.llm_client)
@@ -95,10 +107,13 @@ class AyurMindApp:
             # add user message
             history.append({"role": "user", "content": message})
 
-            response = self.orchestrator.simple_query(message)
+            response = self.orchestrator.simple_query(message, history)
+
+            # Extract the final_response text from the dictionary
+            response_text = response.get('final_response', str(response))
 
             # add assistant message
-            history.append({"role": "assistant", "content": response})
+            history.append({"role": "assistant", "content": response_text})
 
             return history
 
@@ -130,7 +145,7 @@ class AyurMindApp:
             )
             
             msg.submit(self.chat, [msg, chatbot], [chatbot])
-            submit.click(self.chat, [msg, chatbot], [chatbot])
+            submit.click(self.chat, [msg, chatbot], [chatbot]).then(lambda: "", None, [msg])
             msg.submit(lambda: "", None, [msg])
             clear.click(lambda: None, None, [chatbot])
         
@@ -142,8 +157,11 @@ class AyurMindApp:
         if server_port is None:
             server_port = int(os.getenv("GRADIO_PORT", "7860"))
         
+        # Use 0.0.0.0 when sharing so the public link works
+        server_name = "0.0.0.0" if share else "127.0.0.1"
+        
         interface = self.create_interface()
-        interface.launch(share=share, server_port=server_port, server_name="127.0.0.1")
+        interface.launch(share=share, server_port=server_port, server_name=server_name)
 
 def main():
     app = AyurMindApp()
