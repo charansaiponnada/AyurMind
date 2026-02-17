@@ -1,0 +1,62 @@
+sequenceDiagram
+    participant User as <i class='fas fa-user'></i> User
+    participant UI as <i class='fas fa-desktop'></i> Gradio Interface
+    participant Orch as <i class='fas fa-cogs'></i> Orchestrator
+    participant P as <i class='fas fa-user-check'></i> Prakriti Agent
+    participant D as <i class='fas fa-heartbeat'></i> Dosha Agent
+    participant T as <i class='fas fa-prescription-bottle-alt'></i> Treatment Agent
+    participant RAG as <i class='fas fa-file-alt'></i> RAG Pipeline
+    participant VDB as <i class='fas fa-database'></i> ChromaDB
+    participant LLM as <i class='fas fa-brain'></i> Llama-3-8B
+
+    User->>UI: "I have digestive issues, anxiety, dry skin"
+    UI->>Orch: Forward user query
+    
+    Note over Orch: Analyze query & Determine agent sequence
+    
+    rect rgb(227, 242, 253)
+    Note right of Orch: Phase 1: Constitutional Assessment
+    Orch->>P: "Assess user's Prakriti"
+    P->>RAG: Query: "Vata characteristics dry skin anxiety"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks from<br/><i class='fas fa-book-open'></i> Charaka Samhita
+    RAG-->>P: Retrieved context
+    P->>LLM: Prompt + Context + User info
+    LLM-->>P: Analysis result
+    P-->>Orch: "Likely Vata-dominant constitution"
+    end
+    
+    rect rgb(232, 245, 233)
+    Note right of Orch: Phase 2: Imbalance Detection
+    Orch->>D: "Identify Dosha imbalances (Vikriti)"
+    D->>RAG: Query: "digestive issues anxiety causes"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks
+    RAG-->>D: Retrieved disease causation texts
+    D->>LLM: Prompt + Context + Symptoms
+    LLM-->>D: Diagnostic result
+    D-->>Orch: "Vata aggravation confirmed"
+    end
+    
+    rect rgb(255, 243, 224)
+    Note right of Orch: Phase 3: Treatment Recommendation
+    Orch->>T: "Suggest Vata-balancing treatments"
+    T->>RAG: Query: "Vata pacifying diet herbs lifestyle"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 treatment protocols
+    RAG-->>T: Retrieved therapy guidelines
+    T->>LLM: Prompt + Context + Prakriti + Vikriti
+    LLM-->>T: Treatment recommendations
+    T-->>Orch: "Warm foods, ashwagandha, oil massage"
+    end
+    
+    rect rgb(243, 229, 245)
+    Note right of Orch: Phase 4: Synthesis
+    Orch->>LLM: Synthesize all agent outputs into a<br/>holistic consultation report
+    LLM-->>Orch: Final response
+    end
+    
+    Orch->>UI: Complete recommendation with citations
+    UI->>User: Display formatted response
+    
+    Note over User,LLM: All recommendations are grounded in<br/>retrieved classical texts to ensure authenticity.

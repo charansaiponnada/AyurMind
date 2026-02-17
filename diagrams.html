@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AyurMind - System Architecture & Data Flow</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1, h2 {
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        h2 {
+            font-size: 1.8rem;
+            margin-top: 3rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid #1abc9c;
+            padding-bottom: 0.5rem;
+            display: inline-block;
+        }
+
+        .diagram-container {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 1400px;
+            margin-bottom: 3rem;
+            overflow: auto;
+        }
+        
+        .download-buttons {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+
+        .download-btn {
+            background-color: #1abc9c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: background-color 0.3s ease;
+        }
+
+        .download-btn:hover {
+            background-color: #16a085;
+        }
+
+        .mermaid {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h1><i class="fas fa-project-diagram"></i> AyurMind System Diagrams</h1>
+
+    <div class="diagram-container">
+        <h2><i class="fas fa-sitemap"></i> System Architecture</h2>
+        <div id="architecture-diagram" class="mermaid">
+graph TB
+    subgraph "User Interface Layer"
+        UI["<i class='fas fa-desktop'></i> Gradio Web Interface<br/>Bilingual: English/Hindi"]
+    end
+    
+    subgraph "Orchestration Layer"
+        ORCH["<i class='fas fa-cogs'></i> Orchestrator Agent<br/>Coordination & Synthesis"]
+    end
+    
+    subgraph "Specialized Agent Layer"
+        A1["<i class='fas fa-user-check'></i> Prakriti Assessor Agent<br/>Constitutional Type Analysis"]
+        A2["<i class='fas fa-heartbeat'></i> Dosha Imbalance Detector<br/>Vikriti Identification"]
+        A3["<i class='fas fa-prescription-bottle-alt'></i> Treatment Recommender<br/>Personalized Interventions"]
+    end
+    
+    subgraph "Retrieval-Augmented Generation Layer"
+        RAG["<i class='fas fa-file-alt'></i> RAG Pipeline<br/>LangChain"]
+        EMBED["<i class='fas fa-atom'></i> Embedding Model<br/>sentence-transformers"]
+        VDB[("<i class='fas fa-database'></i> ChromaDB<br/>Vector Database")]
+    end
+    
+    subgraph "Language Model Layer"
+        LLM["<i class='fas fa-brain'></i> Llama-3-8B / Mistral-7B<br/>via Ollama"]
+    end
+    
+    subgraph "Knowledge Base Layer"
+        KB1["<i class='fas fa-book-open'></i> Charaka Samhita<br/>Chunked & Indexed"]
+        KB2["<i class='fas fa-book-open'></i> Sushruta Samhita<br/>Chunked & Indexed"]
+        KB3["<i class='fas fa-book-open'></i> Ashtanga Hridaya<br/>Chunked & Indexed"]
+    end
+    
+    %% User interactions
+    UI -->|User Query| ORCH
+    ORCH -->|Final Response| UI
+    
+    %% Orchestrator to agents
+    ORCH -->|Delegate: Assess Constitution| A1
+    ORCH -->|Delegate: Detect Imbalances| A2
+    ORCH -->|Delegate: Recommend Treatment| A3
+    
+    A1 -->|Prakriti Assessment| ORCH
+    A2 -->|Dosha Analysis| ORCH
+    A3 -->|Treatment Plan| ORCH
+    
+    %% Agents to RAG
+    A1 -->|Query: Constitution traits| RAG
+    A2 -->|Query: Symptoms & causes| RAG
+    A3 -->|Query: Therapies & herbs| RAG
+    
+    RAG -->|Retrieved Context| A1
+    RAG -->|Retrieved Context| A2
+    RAG -->|Retrieved Context| A3
+    
+    %% RAG to Vector DB
+    RAG -->|Semantic Search| VDB
+    VDB -->|Top-K Relevant Chunks| RAG
+    
+    %% Embedding flow
+    EMBED -->|Generate Embeddings| VDB
+    
+    %% Knowledge base to vector DB
+    KB1 -->|Indexed Content| VDB
+    KB2 -->|Indexed Content| VDB
+    KB3 -->|Indexed Content| VDB
+    
+    %% LLM usage
+    ORCH -.->|LLM Calls| LLM
+    A1 -.->|LLM Calls| LLM
+    A2 -.->|LLM Calls| LLM
+    A3 -.->|LLM Calls| LLM
+    
+    %% Styling
+    classDef userLayer fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#000
+    classDef orchestLayer fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#000
+    classDef agentLayer fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#000
+    classDef ragLayer fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px,color:#000
+    classDef llmLayer fill:#FCE4EC,stroke:#C2185B,stroke-width:2px,color:#000
+    classDef kbLayer fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#000
+    
+    class UI userLayer
+    class ORCH orchestLayer
+    class A1,A2,A3 agentLayer
+    class RAG,EMBED,VDB ragLayer
+    class LLM llmLayer
+    class KB1,KB2,KB3 kbLayer
+        </div>
+        <div class="download-buttons">
+            <button class="download-btn" onclick="downloadSVG('architecture-diagram', 'architecture.svg')">Download SVG</button>
+            <button class="download-btn" onclick="downloadPNG('architecture-diagram', 'architecture_400dpi.png')">Download PNG (400 DPI)</button>
+        </div>
+    </div>
+
+    <div class="diagram-container">
+        <h2><i class="fas fa-exchange-alt"></i> Data Flow Diagram</h2>
+        <div id="dataflow-diagram" class="mermaid">
+sequenceDiagram
+    participant User as <i class='fas fa-user'></i> User
+    participant UI as <i class='fas fa-desktop'></i> Gradio Interface
+    participant Orch as <i class='fas fa-cogs'></i> Orchestrator
+    participant P as <i class='fas fa-user-check'></i> Prakriti Agent
+    participant D as <i class='fas fa-heartbeat'></i> Dosha Agent
+    participant T as <i class='fas fa-prescription-bottle-alt'></i> Treatment Agent
+    participant RAG as <i class='fas fa-file-alt'></i> RAG Pipeline
+    participant VDB as <i class='fas fa-database'></i> ChromaDB
+    participant LLM as <i class='fas fa-brain'></i> Llama-3-8B
+
+    User->>UI: "I have digestive issues, anxiety, dry skin"
+    UI->>Orch: Forward user query
+    
+    Note over Orch: Analyze query & Determine agent sequence
+    
+    rect rgb(227, 242, 253)
+    Note right of Orch: Phase 1: Constitutional Assessment
+    Orch->>P: "Assess user's Prakriti"
+    P->>RAG: Query: "Vata characteristics dry skin anxiety"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks from<br/><i class='fas fa-book-open'></i> Charaka Samhita
+    RAG-->>P: Retrieved context
+    P->>LLM: Prompt + Context + User info
+    LLM-->>P: Analysis result
+    P-->>Orch: "Likely Vata-dominant constitution"
+    end
+    
+    rect rgb(232, 245, 233)
+    Note right of Orch: Phase 2: Imbalance Detection
+    Orch->>D: "Identify Dosha imbalances (Vikriti)"
+    D->>RAG: Query: "digestive issues anxiety causes"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 relevant text chunks
+    RAG-->>D: Retrieved disease causation texts
+    D->>LLM: Prompt + Context + Symptoms
+    LLM-->>D: Diagnostic result
+    D-->>Orch: "Vata aggravation confirmed"
+    end
+    
+    rect rgb(255, 243, 224)
+    Note right of Orch: Phase 3: Treatment Recommendation
+    Orch->>T: "Suggest Vata-balancing treatments"
+    T->>RAG: Query: "Vata pacifying diet herbs lifestyle"
+    RAG->>VDB: Semantic search
+    VDB-->>RAG: Top-5 treatment protocols
+    RAG-->>T: Retrieved therapy guidelines
+    T->>LLM: Prompt + Context + Prakriti + Vikriti
+    LLM-->>T: Treatment recommendations
+    T-->>Orch: "Warm foods, ashwagandha, oil massage"
+    end
+    
+    rect rgb(243, 229, 245)
+    Note right of Orch: Phase 4: Synthesis
+    Orch->>LLM: Synthesize all agent outputs into a<br/>holistic consultation report
+    LLM-->>Orch: Final response
+    end
+    
+    Orch->>UI: Complete recommendation with citations
+    UI->>User: Display formatted response
+    
+    Note over User,LLM: All recommendations are grounded in<br/>retrieved classical texts to ensure authenticity.
+        </div>
+         <div class="download-buttons">
+            <button class="download-btn" onclick="downloadSVG('dataflow-diagram', 'dataflow.svg')">Download SVG</button>
+            <button class="download-btn" onclick="downloadPNG('dataflow-diagram', 'dataflow_400dpi.png')">Download PNG (400 DPI)</button>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true,
+            securityLevel: 'loose' 
+        });
+
+        function downloadSVG(diagramId, fileName) {
+            const svgElement = document.querySelector(`#${diagramId} > svg`);
+            if (!svgElement) {
+                console.error('SVG not found for diagram:', diagramId);
+                return;
+            }
+
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function downloadPNG(diagramId, fileName) {
+            const svgElement = document.querySelector(`#${diagramId} > svg`);
+            if (!svgElement) {
+                console.error('SVG not found for diagram:', diagramId);
+                return;
+            }
+
+            const scale = 400 / 96; // Approximate conversion from screen DPI (96) to target DPI (400)
+            const width = svgElement.width.baseVal.value * scale;
+            const height = svgElement.height.baseVal.value * scale;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            // Set a white background
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            const img = new Image();
+            img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+
+            img.onload = function() {
+                ctx.drawImage(img, 0, 0, width, height);
+                const url = canvas.toDataURL('image/png');
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+            img.onerror = function(e) {
+                console.error('Failed to load SVG image for PNG conversion', e);
+            };
+        }
+    </script>
+
+</body>
+</html>

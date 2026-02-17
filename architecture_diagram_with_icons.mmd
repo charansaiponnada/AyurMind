@@ -1,0 +1,85 @@
+graph TB
+    subgraph "User Interface Layer"
+        UI["<i class='fas fa-desktop'></i> Gradio Web Interface<br/>Bilingual: English/Hindi"]
+    end
+    
+    subgraph "Orchestration Layer"
+        ORCH["<i class='fas fa-cogs'></i> Orchestrator Agent<br/>Coordination & Synthesis"]
+    end
+    
+    subgraph "Specialized Agent Layer"
+        A1["<i class='fas fa-user-check'></i> Prakriti Assessor Agent<br/>Constitutional Type Analysis"]
+        A2["<i class='fas fa-heartbeat'></i> Dosha Imbalance Detector<br/>Vikriti Identification"]
+        A3["<i class='fas fa-prescription-bottle-alt'></i> Treatment Recommender<br/>Personalized Interventions"]
+    end
+    
+    subgraph "Retrieval-Augmented Generation Layer"
+        RAG["<i class='fas fa-file-alt'></i> RAG Pipeline<br/>LangChain"]
+        EMBED["<i class='fas fa-atom'></i> Embedding Model<br/>sentence-transformers"]
+        VDB[("<i class='fas fa-database'></i> ChromaDB<br/>Vector Database")]
+    end
+    
+    subgraph "Language Model Layer"
+        LLM["<i class='fas fa-brain'></i> Llama-3-8B / Mistral-7B<br/>via Ollama"]
+    end
+    
+    subgraph "Knowledge Base Layer"
+        KB1["<i class='fas fa-book-open'></i> Charaka Samhita<br/>Chunked & Indexed"]
+        KB2["<i class='fas fa-book-open'></i> Sushruta Samhita<br/>Chunked & Indexed"]
+        KB3["<i class='fas fa-book-open'></i> Ashtanga Hridaya<br/>Chunked & Indexed"]
+    end
+    
+    %% User interactions
+    UI -->|User Query| ORCH
+    ORCH -->|Final Response| UI
+    
+    %% Orchestrator to agents
+    ORCH -->|Delegate: Assess Constitution| A1
+    ORCH -->|Delegate: Detect Imbalances| A2
+    ORCH -->|Delegate: Recommend Treatment| A3
+    
+    A1 -->|Prakriti Assessment| ORCH
+    A2 -->|Dosha Analysis| ORCH
+    A3 -->|Treatment Plan| ORCH
+    
+    %% Agents to RAG
+    A1 -->|Query: Constitution traits| RAG
+    A2 -->|Query: Symptoms & causes| RAG
+    A3 -->|Query: Therapies & herbs| RAG
+    
+    RAG -->|Retrieved Context| A1
+    RAG -->|Retrieved Context| A2
+    RAG -->|Retrieved Context| A3
+    
+    %% RAG to Vector DB
+    RAG -->|Semantic Search| VDB
+    VDB -->|Top-K Relevant Chunks| RAG
+    
+    %% Embedding flow
+    EMBED -->|Generate Embeddings| VDB
+    
+    %% Knowledge base to vector DB
+    KB1 -->|Indexed Content| VDB
+    KB2 -->|Indexed Content| VDB
+    KB3 -->|Indexed Content| VDB
+    
+    %% LLM usage
+    ORCH -.->|LLM Calls| LLM
+    A1 -.->|LLM Calls| LLM
+    A2 -.->|LLM Calls| LLM
+    A3 -.->|LLM Calls| LLM
+    
+    %% Styling
+    classDef userLayer fill:#E3F2FD,stroke:#1976D2,stroke-width:2px,color:#000
+    classDef orchestLayer fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#000
+    classDef agentLayer fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#000
+    classDef ragLayer fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px,color:#000
+    classDef llmLayer fill:#FCE4EC,stroke:#C2185B,stroke-width:2px,color:#000
+    classDef kbLayer fill:#FFF9C4,stroke:#F9A825,stroke-width:2px,color:#000
+    
+    class UI userLayer
+    class ORCH orchestLayer
+    class A1,A2,A3 agentLayer
+    class RAG,EMBED,VDB ragLayer
+    class LLM llmLayer
+    class KB1,KB2,KB3 kbLayer

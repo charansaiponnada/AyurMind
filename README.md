@@ -136,46 +136,19 @@ python scripts/04_run_app.py
 
 ## 🧠 Architecture
 
-### System Components
+### System Overview
 
-```
-User Query → Gradio UI → Orchestrator Agent
-                              ↓
-                    Delegate to Specialists:
-                    ├─ Prakriti Agent
-                    ├─ Dosha Agent  
-                    └─ Treatment Agent
-                              ↓
-                    Each Agent → RAG Retrieval
-                              ↓
-                    ChromaDB Vector Search
-                              ↓
-                    Retrieved Context → LLM Reasoning
-                              ↓
-                    Synthesized Response → User
-```
+Below is a high-level architectural diagram illustrating the main components and their interactions within the AyurMind system.
 
-### Agent Roles
+![AyurMind System Architecture](images/architecture_diagram.png)
 
-1. **Prakriti Assessor Agent**
-   - Analyzes body constitution (Vata/Pitta/Kapha)
-   - Retrieves constitutional trait descriptions
-   - Outputs: Constitution type + confidence
+### Data Flow
 
-2. **Dosha Imbalance Detector**
-   - Identifies current health imbalances
-   - Retrieves disease causation patterns
-   - Outputs: Imbalance diagnosis + severity
+This diagram details the flow of data through the system, from user query to the final synthesized recommendation, highlighting the roles of specialized agents and the RAG pipeline.
 
-3. **Treatment Recommender**
-   - Suggests personalized interventions
-   - Retrieves therapeutic protocols
-   - Outputs: Diet + herbs + lifestyle changes
+![AyurMind Data Flow](images/dataflow_diagram.png)
 
-4. **Orchestrator**
-   - Coordinates all agents
-   - Synthesizes final recommendations
-   - Manages conversation flow
+*Note: These diagrams are generated from the Mermaid files (`architecture_diagram_with_icons.mmd`, `dataflow_diagram_with_icons.mmd`) located in this repository.*
 
 ---
 
