@@ -97,71 +97,81 @@ class AyurMindApp:
     #         return response
     #     except Exception as e:
     #         return f"Error: {str(e)}. Please try again."
-    def chat(self, message: str, history: list):
-        history = history or []
-
-        if not message.strip():
-            return history
-
-        try:
-            # add user message
-            history.append({"role": "user", "content": message})
-
-            response = self.orchestrator.simple_query(message, history)
-
-            # Extract the final_response text from the dictionary
-            response_text = response.get('final_response', str(response))
-
-            # add assistant message
-            history.append({"role": "assistant", "content": response_text})
-
-            return history
-
-        except Exception as e:
-            history.append({
-                "role": "assistant",
-                "content": f"Error: {str(e)}. Please try again."
-            })
-            return history
-
+        def chat(self, message: str, history: list, user_mode: str):
+            history = history or []
     
-    def create_interface(self):
-        with gr.Blocks(title="AyurMind") as interface:
-            gr.HTML('<div style="text-align:center; padding:2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; border-radius:10px;"><h1>🌿 AyurMind</h1><p style="font-size:1.2rem;">AI-Powered Ayurvedic Consultation</p></div>')
-            
-            gr.HTML('<div style="background:#fff3cd; border:1px solid #ffc107; padding:1rem; border-radius:5px; margin:1rem 0;"><strong>⚠️ Disclaimer:</strong> Educational only. Not medical advice. Consult professionals.</div>')
-            
-            chatbot = gr.Chatbot(height=500, label="Consultation")
-            
-            with gr.Row():
-                msg = gr.Textbox(label="Your Question", placeholder="Describe your concern...", scale=4)
-                submit = gr.Button("Send", variant="primary", scale=1)
-            
-            clear = gr.Button("Clear")
-            
-            gr.Examples(
-                examples=[["I have digestive issues and anxiety"], ["What is Vata constitution?"], ["Foods for better sleep?"]],
-                inputs=msg
-            )
-            
-            msg.submit(self.chat, [msg, chatbot], [chatbot])
-            submit.click(self.chat, [msg, chatbot], [chatbot]).then(lambda: "", None, [msg])
-            msg.submit(lambda: "", None, [msg])
-            clear.click(lambda: None, None, [chatbot])
-        
-        return interface
+            if not message.strip():
+                return history
     
-    def launch(self, share: bool = None, server_port: int = None):
-        if share is None:
-            share = os.getenv("GRADIO_SHARE", "false").lower() == "true"
-        if server_port is None:
-            server_port = int(os.getenv("GRADIO_PORT", "7860"))
+            try:
+                # add user message
+                history.append({"role": "user", "content": message})
+    
+                # Pass the user_mode to the orchestrator, converting to lower case
+                response = self.orchestrator.simple_query(message, history, user_mode=user_mode.lower())
+    
+                # Extract the final_response text from the dictionary
+                response_text = response.get('final_response', str(response))
+    
+                # add assistant message
+                history.append({"role": "assistant", "content": response_text})
+    
+                return history
+    
+            except Exception as e:
+                history.append({
+                    "role": "assistant",
+                    "content": f"Error: {str(e)}. Please try again."
+                })
+                return history
+    
         
-        # Use 0.0.0.0 when sharing so the public link works
-        server_name = "0.0.0.0" if share else "127.0.0.1"
+        def create_interface(self):
+            with gr.Blocks(title="AyurMind") as interface:
+                gr.HTML('<div style="text-align:center; padding:2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; border-radius:10px;"><h1>🌿 AyurMind</h1><p style="font-size:1.2rem;">AI-Powered Ayurvedic Consultation</p></div>')
+                
+                gr.HTML('<div style="background:#fff3cd; border:1px solid #ffc107; padding:1rem; border-radius:5px; margin:1rem 0;"><strong>⚠️ Disclaimer:</strong> Educational only. Not medical advice. Consult professionals.</div>')
+                
+                with gr.Row():
+                    with gr.Column(scale=4):
+                        chatbot = gr.Chatbot(height=500, label="Consultation")
+                    with gr.Column(scale=1):
+                        user_mode = gr.Radio(
+                            ["Beginner", "Intermediate", "Expert"],
+                            label="Select Your Expertise Level",
+                            value="Expert",
+                            info="Choose the level of detail for your consultation."
+                        )
+                
+                with gr.Row():
+                    msg = gr.Textbox(label="Your Question", placeholder="Describe your concern...", scale=4)
+                    submit = gr.Button("Send", variant="primary", scale=1)
+                
+                clear = gr.Button("Clear")
+                
+                gr.Examples(
+                    examples=[["I have digestive issues and anxiety"], ["What is Vata constitution?"], ["Foods for better sleep?"]],
+                    inputs=msg
+                )
+                
+                # Update event handlers to include the user_mode input
+                msg.submit(self.chat, [msg, chatbot, user_mode], [chatbot])
+                submit.click(self.chat, [msg, chatbot, user_mode], [chatbot]).then(lambda: "", None, [msg])
+                clear.click(lambda: None, None, [chatbot])
+            
+            return interface
         
-        interface = self.create_interface()
-        interface.launch(share=share, server_port=server_port, server_name=server_name)
+        def launch(self, share: bool = None, server_port: int = None):
+            if share is None:
+                share = os.getenv("GRADIO_SHARE", "false").lower() == "true"
+            if server_port is None:
+                server_port = int(os.getenv("GRADIO_PORT", "7860"))
+            
+            # Use 0.0.0.0 when sharing so the public link works
+            server_name = "0.0.0.0" if share else "127.0.0.1"
+            
+            interface = self.create_interface()
+            interface.launch(share=share, server_port=server_port, server_name=server_name)
 
 def main():
     app = AyurMindApp()

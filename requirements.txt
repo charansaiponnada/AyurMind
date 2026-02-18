@@ -44,3 +44,9 @@ flake8==7.0.0
 mypy==1.8.0
 ipykernel==6.28.0
 jupyter==1.0.0
+
+# API Server
+Flask==3.0.0
+Flask-Cors==4.0.0
+Flask-SocketIO==5.3.6
+eventlet==0.35.2

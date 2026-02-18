@@ -1,0 +1,75 @@
+.login-container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+
+.login-form-panel {
+  width: 40%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem;
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+  z-index: 1;
+}
+
+.login-display-panel {
+  width: 60%;
+  height: 100%;
+  background-color: #f8f9fa; /* A very light grey for contrast */
+}
+
+.login-form-panel h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #212529; /* Darker text */
+  margin-bottom: 2rem;
+  font-family: 'Georgia', serif; /* A more elegant font for the title */
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 350px;
+  gap: 1.5rem;
+}
+
+.login-input {
+  padding: 1rem;
+  border: 1px solid #ced4da;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.login-input:focus {
+  outline: none;
+  border-color: #007bff; /* A nice popping blue */
+}
+
+.login-button {
+  padding: 1rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #007bff, #0056b3); /* Popping blue gradient */
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.login-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.4);
+}
+
+.login-error {
+  color: #dc3545; /* A standard error red */
+  text-align: center;
+}
