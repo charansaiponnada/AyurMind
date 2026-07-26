@@ -1,0 +1,225 @@
+\chapter{The Retrieval Layer}
+
+Three small classes sit between a question and the passages that answer it. \code{EmbeddingGenerator} turns text into vectors, \code{AyurvedicVectorStore} owns the Chroma collection, and \code{RAGRetriever} joins them. Together they are under 130 lines. No framework is involved --- despite \code{langchain} being pinned in \fpath{requirements.txt}, it is never imported.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=8mm]
+  \node[blk=slate, minimum width=30mm] (q) {query string};
+  \node[blk=plum, right=12mm of q, minimum width=36mm, align=center]
+       (e) {EmbeddingGenerator\\\scriptsize all-mpnet-base-v2};
+  \node[blk=plum, right=12mm of e, minimum width=30mm, align=center]
+       (v) {768-dim vector};
+  \node[blk=deepgreen, below=12mm of v, minimum width=42mm, align=center]
+       (s) {AyurvedicVectorStore.search\\\scriptsize cosine + where filter};
+  \node[db=deepgreen, left=14mm of s, minimum width=30mm] (c) {Chroma\\collection};
+  \node[blk=clay, left=14mm of c, minimum width=34mm, align=center]
+       (r) {top-\emph{k} chunks\\\scriptsize id, text, metadata, distance};
+
+  \draw[arb=plum] (q) -- (e);
+  \draw[arb=plum] (e) -- (v);
+  \draw[arb=deepgreen] (v) -- (s);
+  \draw[arb=deepgreen] (s) -- (c);
+  \draw[arb=clay] (c) -- (r);
+
+  \node[lbl, above=0.5mm of s] {\code{category\_filter}, \code{source\_filter}};
+\end{tikzpicture}
+\caption{One retrieval. The two filters are optional and are combined into a single Chroma \code{where} clause.}
+\end{figure}
+
+\section{Embeddings}
+
+\begin{lstlisting}[style=py]
+class EmbeddingGenerator:
+    def __init__(self, model_name: str = None):
+        if model_name is None:
+            model_name = os.getenv("EMBEDDING_MODEL",
+                                   "sentence-transformers/all-mpnet-base-v2")
+        self.model = SentenceTransformer(model_name)
+        self.embedding_dim = self.model.get_sentence_embedding_dimension()
+
+    def embed_text(self, text: str) -> np.ndarray:
+        return self.model.encode(text, convert_to_numpy=True)
+
+    def embed_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+        return self.model.encode(texts, batch_size=batch_size,
+                                 show_progress_bar=True, convert_to_numpy=True)
+\end{lstlisting}
+
+\code{all-mpnet-base-v2} produces 768-dimensional vectors and is a general-purpose English model. It has never seen Sanskrit, so transliterated terms are embedded as unfamiliar token sequences. Retrieval works because the scraped text is an English translation with Sanskrit terms interleaved --- the English carries the semantic signal. Queries written mostly in transliterated Sanskrit will retrieve worse than the same question asked in English.
+
+The class is instantiated twice in a normal session: once by \fpath{scripts/02\_build\_vectordb.py} to embed the corpus, once by \code{AyurMindApp} to embed queries. Both load the same model weights, roughly 420~MB, into memory.
+
+\begin{note}[title={Why \code{embed\_batch} exists separately}]
+Indexing embeds thousands of chunks at once, which is far faster in batches of 32 with a progress bar. Query time embeds exactly one string, where the batching machinery is pure overhead. Hence two methods over the same model.
+\end{note}
+
+\section{The vector store}
+
+\code{AyurvedicVectorStore} wraps a single persistent Chroma collection.
+
+\begin{lstlisting}[style=py,firstnumber=9]
+    def __init__(self, persist_directory: str = None):
+        if persist_directory is None:
+            persist_directory = os.getenv("VECTOR_DB_PATH", "./data/vectordb")
+        self.persist_directory = Path(persist_directory)
+        self.persist_directory.mkdir(parents=True, exist_ok=True)
+
+        self.client = chromadb.PersistentClient(path=str(self.persist_directory))
+        self.collection = self.client.get_or_create_collection(
+            name="ayurvedic_texts",
+            metadata={"description": "Charaka Samhita chunks"}
+        )
+\end{lstlisting}
+
+\code{get\_or\_create\_collection} makes the constructor safe to call against an empty directory --- you get an empty collection rather than an exception. That is convenient and also the reason a misconfigured \code{VECTOR\_DB\_PATH} produces zero search results instead of a clear error.
+
+\subsection{Indexing}
+
+\begin{lstlisting}[style=py,firstnumber=21]
+    def add_chunks(self, chunks: List[Dict], embeddings: List[List[float]],
+                   batch_size: int = 100):
+        for i in tqdm(range(0, len(chunks), batch_size), desc="Adding chunks"):
+            batch_chunks     = chunks[i:i+batch_size]
+            batch_embeddings = embeddings[i:i+batch_size]
+
+            ids       = [f"chunk_{i+j}" for j in range(len(batch_chunks))]
+            documents = [chunk['text']     for chunk in batch_chunks]
+            metadatas = [chunk['metadata'] for chunk in batch_chunks]
+
+            self.collection.add(ids=ids, documents=documents,
+                                embeddings=batch_embeddings, metadatas=metadatas)
+\end{lstlisting}
+
+IDs are positional --- \code{chunk\_0} through \code{chunk\_N}, derived from the offset in \code{all\_chunks.json}. They carry no meaning and are not stable across rebuilds: re-running the scraper with a different chapter count renumbers everything. Nothing in the application relies on ID stability, but the evaluation results files record source IDs, so those IDs only make sense against the database version they were produced with.
+
+\begin{warn}[title={Re-indexing does not clear the collection}]
+\code{add\_chunks} only calls \code{collection.add}. Running \fpath{scripts/02\_build\_vectordb.py} twice against an existing database attempts to insert the same IDs again. Delete \code{data/vectordb/} before a rebuild.
+\end{warn}
+
+\subsection{Search and the where clause}
+
+This is the most consequential method in the retrieval layer, because it is where the agents' category filters and the orchestrator's source filter get combined.
+
+\begin{lstlisting}[style=py,firstnumber=32]
+    def search(self, query_embedding: List[float], n_results: int = 5,
+               category_filter: Optional[str] = None,
+               source_filter:   Optional[str] = None) -> Dict:
+        where_conditions = []
+        if category_filter:
+            where_conditions.append({"category": category_filter})
+
+        if source_filter:
+            # Match source_filter against 'section' or 'chapter' metadata
+            where_conditions.append({"$or": [{"section": source_filter},
+                                             {"chapter":  source_filter}]})
+
+        where_clause = None
+        if where_conditions:
+            if len(where_conditions) == 1:
+                where_clause = where_conditions[0]
+            else:
+                where_clause = {"$and": where_conditions}
+
+        return self.collection.query(query_embeddings=[query_embedding],
+                                     n_results=n_results, where=where_clause)
+\end{lstlisting}
+
+Three shapes come out of that logic:
+
+\begin{lstlisting}[style=json]
+// no filters - the fast path and unfiltered helper calls
+where = None
+
+// category only - the normal case for every specialist agent
+where = {"category": "treatment"}
+
+// category + source - user named a Sthana in the query
+where = {"$and": [
+           {"category": "treatment"},
+           {"$or": [{"section": "Siddhi Sthana"},
+                    {"chapter":  "Siddhi Sthana"}]}
+         ]}
+\end{lstlisting}
+
+\begin{bug}[title={The source filter needs an exact string match}]
+Chroma's \code{where} does equality, not substring matching. The \code{section} values written by the processor are full display names --- \code{"Section on Therapeutic Procedures"} --- while the orchestrator's regex extracts \code{"Siddhi Sthana"}. Those strings are not equal, so the \code{\$or} matches nothing, the \code{\$and} matches nothing, and a query that names a Sthana retrieves \textbf{zero} chunks rather than more focused ones. Fixing this means either storing the Sthana key (\code{"Siddhi\_Sthana"} $\rightarrow$ \code{"Siddhi Sthana"}) as its own metadata field, or mapping the extracted phrase to the full display name before filtering.
+\end{bug}
+
+\subsection{Statistics}
+
+\begin{lstlisting}[style=py,firstnumber=51]
+    def get_stats(self) -> Dict:
+        total_count = self.collection.count()
+        return {'total_chunks': total_count, 'categories': {}}
+\end{lstlisting}
+
+\code{categories} is a placeholder that always returns empty. The real category histogram is in \code{data/processed/processing\_summary.json}, written during step 1.
+
+\section{The retriever}
+
+\code{RAGRetriever} owns the default result count and reshapes Chroma's column-oriented response into a list of dictionaries.
+
+\begin{lstlisting}[style=py,firstnumber=13]
+    def retrieve(self, query: str, n_results: int = None,
+                 category_filter: Optional[str] = None,
+                 source_filter:   Optional[str] = None) -> List[Dict]:
+        if n_results is None:
+            n_results = self.max_chunks          # MAX_CHUNKS_PER_QUERY, default 5
+
+        query_embedding = self.embedding_generator.embed_text(query)
+        results = self.vectorstore.search(
+            query_embedding=query_embedding.tolist(), n_results=n_results,
+            category_filter=category_filter, source_filter=source_filter)
+
+        retrieved_chunks = []
+        for i in range(len(results['ids'][0])):
+            retrieved_chunks.append({
+                'id':       results['ids'][0][i],
+                'text':     results['documents'][0][i],
+                'metadata': results['metadatas'][0][i],
+                'distance': results['distances'][0][i]
+                            if 'distances' in results else None
+            })
+        return retrieved_chunks
+\end{lstlisting}
+
+The \code{[0]} indexing everywhere is Chroma's batch dimension --- \code{query} accepts a list of query vectors and returns parallel lists of results. One query goes in, so index zero comes out.
+
+Note what is \emph{not} here: no distance threshold, no reranking, no deduplication, no minimum-relevance cutoff. Whatever the nearest five vectors are, they go into the prompt. If the collection holds nothing relevant, the five least-irrelevant chunks are still retrieved and still presented to the model as authoritative context. This is the main structural weakness of the grounding story, and it is worth knowing when reading the hallucination-rate discussion in Chapter~\ref{ch:eval}.
+
+\subsection{Two ways to build context}
+
+\code{RAGRetriever.build\_context()} formats chunks into a prompt-ready string. It is used by the single-agent RAG baseline in the evaluation harness:
+
+\begin{lstlisting}[style=py,firstnumber=32]
+    def build_context(self, query: str, n_results: int = None,
+                      category_filter: Optional[str] = None,
+                      include_metadata: bool = True) -> str:
+        chunks = self.retrieve(query, n_results, category_filter)
+        context_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            if include_metadata:
+                metadata = chunk['metadata']
+                source = (f"[Source: {metadata.get('section', 'Unknown')} - "
+                          f"{metadata.get('chapter', 'Unknown')}]")
+                context_parts.append(f"--- Context {i} {source} ---")
+            else:
+                context_parts.append(f"--- Context {i} ---")
+            context_parts.append(chunk['text'])
+            context_parts.append("")
+        return "\n".join(context_parts)
+\end{lstlisting}
+
+The agents do not call it. \code{BaseAgent.retrieve\_context\_and\_sources()} produces the same string but also returns the raw chunk list, because the orchestrator needs the chunk metadata to build its citation block. The duplication is small but real: two functions format context identically, and \code{build\_context} has no \code{source\_filter} parameter, so it cannot honour a user's request for a specific Sthana.
+
+The resulting context string looks like this:
+
+\begin{lstlisting}[style=plain]
+--- Context 1 [Source: Section on Therapeutic Principles - Jvara Chikitsa] ---
+In the management of Jvara, the physician should first assess the state of
+Agni. Langhana is indicated in Ama-avastha ...
+
+--- Context 2 [Source: Section on Fundamental Principles - Deerghanjiviteeya] ---
+...
+\end{lstlisting}

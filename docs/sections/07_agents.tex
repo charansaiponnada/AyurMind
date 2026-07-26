@@ -1,0 +1,444 @@
+\chapter{The Agent Layer}
+\label{ch:agents}
+
+This is where the design lives. Four classes: one abstract base, three specialists that differ only in a prompt and a filter, and an orchestrator that has all the control flow.
+
+\section{BaseAgent: the template}
+
+\code{BaseAgent} is 63 lines and defines the entire agent contract through two abstract methods and one concrete pipeline.
+
+\begin{lstlisting}[style=py,firstnumber=5]
+class BaseAgent(ABC):
+    def __init__(self, name: str, rag_retriever, llm_client,
+                 temperature: float = 0.3, max_tokens: int = 3000):
+        self.name          = name
+        self.rag_retriever = rag_retriever
+        self.llm_client    = llm_client
+        self.temperature   = temperature
+        self.max_tokens    = max_tokens
+
+    @abstractmethod
+    def get_system_prompt(self) -> str: ...
+
+    @abstractmethod
+    def get_category_filter(self) -> Optional[str]: ...
+\end{lstlisting}
+
+A subclass supplies a personality (the system prompt) and a slice of the corpus (the category filter). Everything else is inherited. Adding a fourth specialist is therefore a 15-line file --- see Chapter~\ref{ch:extend}.
+
+\subsection{process(): the three-step pipeline}
+
+\begin{lstlisting}[style=py,firstnumber=59]
+    def process(self, query: str, additional_info: Dict = None,
+                conversation_history: list = None) -> Dict:
+        source_filter = additional_info.get('source_filter') if additional_info else None
+        context, sources = self.retrieve_context_and_sources(query, source_filter=source_filter)
+        response = self.generate_response(query, context, additional_info, conversation_history)
+        return {'agent': self.name, 'response': response,
+                'sources': sources, 'query': query}
+\end{lstlisting}
+
+Retrieve, generate, return both the prose and the chunks it came from. Returning \code{sources} alongside \code{response} is what lets the orchestrator build a citation list without re-running retrieval.
+
+\subsection{Retrieval with the agent's own filter}
+
+\begin{lstlisting}[style=py,firstnumber=21]
+    def retrieve_context_and_sources(self, query: str, n_results: int = 5,
+                                     source_filter: Optional[str] = None):
+        category_filter = self.get_category_filter()
+        chunks = self.rag_retriever.retrieve(query=query, n_results=n_results,
+                                             category_filter=category_filter,
+                                             source_filter=source_filter)
+        context_parts = []
+        for i, chunk in enumerate(chunks, 1):
+            metadata = chunk.get('metadata', {})
+            source = (f"[Source: {metadata.get('section', 'Unknown')} - "
+                      f"{metadata.get('chapter', 'Unknown')}]")
+            context_parts.append(f"--- Context {i} {source} ---")
+            context_parts.append(chunk.get('text', ''))
+            context_parts.append("")
+        return "\n".join(context_parts), chunks
+\end{lstlisting}
+
+The category filter comes from the subclass and is never overridden by the caller. That is the mechanism behind the whole multi-agent premise: three agents asking the same corpus the same question get three different answers because each one is only allowed to see a third of it.
+
+\subsection{Passing structured findings between agents}
+
+\code{generate\_response} folds an \code{additional\_info} dictionary into the query as labelled lines, after removing the one key that is meant for retrieval rather than for the model:
+
+\begin{lstlisting}[style=py,firstnumber=43]
+        # Ensure 'source_filter' is not included in the LLM's additional_info
+        llm_additional_info = additional_info.copy() if additional_info else {}
+        llm_additional_info.pop('source_filter', None)
+
+        if llm_additional_info:
+            info_str = "\n".join([f"{key}: {value}"
+                                  for key, value in llm_additional_info.items()])
+            enhanced_query = f"{query}\n\nAdditional Information:\n{info_str}"
+        else:
+            enhanced_query = query
+\end{lstlisting}
+
+So the treatment agent's actual query text ends up looking like:
+
+\begin{lstlisting}[style=plain]
+I have acid reflux and skin rashes. What should I do?
+
+Additional Information:
+Prakriti: **Provisional Constitutional Assessment**: Pitta-dominant, high confidence.
+  The user's ...
+Dosha Imbalance: **Provisional Diagnosis (Vikriti Nirnaya)**: Pitta Prakopa with
+  Tikshnagni. Amlapitta is indicated by ...
+\end{lstlisting}
+
+Prose is passed between agents, not structured data. There is no schema, no parsing, no validation --- the downstream agent reads its predecessor's report the way a junior clinician reads a colleague's notes. That keeps the code short and makes the handoff lossy in a way that is hard to measure.
+
+\begin{note}[title={One retrieval too many}]
+\code{process()} calls \code{retrieve\_context\_and\_sources()} and then passes the resulting context into \code{generate\_response()}. But \code{generate\_response()} also retrieves when \code{context is None}, so it carries a second, unreachable retrieval path. The dead branch is harmless; it just means two functions know how to fetch context.
+\end{note}
+
+\section{The three specialists}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l c l X@{}}
+\toprule
+\textbf{Class} & \textbf{\code{name}} & \textbf{Temp} & \textbf{Filter} & \textbf{Persona in the system prompt} \\
+\midrule
+\code{PrakritiAgent} & Prakriti Assessor & 0.3 & \code{prakriti} & Senior professor of Sharira Vijnana \\
+\code{DoshaAgent} & Dosha Imbalance Detector & 0.3 & \code{vikriti} & Senior clinician in Vikriti Vijnana \\
+\code{TreatmentAgent} & Treatment Recommender & 0.4 & \code{treatment} & Senior physician designing Chikitsa Krama \\
+\bottomrule
+\end{tabularx}
+\caption{The three specialists. Diagnosis runs cooler than therapy design, which is given slightly more latitude at 0.4.}
+\end{table}
+
+Each class is under 40 lines and most of that is the prompt string. The whole of \fpath{src/agents/prakriti\_agent.py} outside the prompt:
+
+\begin{lstlisting}[style=py]
+class PrakritiAgent(BaseAgent):
+    def __init__(self, rag_retriever, llm_client):
+        super().__init__(name="Prakriti Assessor", rag_retriever=rag_retriever,
+                         llm_client=llm_client, temperature=0.3)
+
+    def get_system_prompt(self) -> str:
+        return """You are a senior Ayurvedic professor specializing in ..."""
+
+    def get_category_filter(self) -> Optional[str]:
+        return "prakriti"
+\end{lstlisting}
+
+\subsection{What each prompt demands}
+
+The prompts are the specification, so they are worth reading closely. All three share four instructions --- scholarly tone, classical citation, Sanskrit terminology with parenthetical glosses, and a fixed output structure --- and then diverge on what they must produce.
+
+\textbf{Prakriti Assessor} must return a constitutional call with a confidence level, a per-dosha breakdown naming the specific Gunas, and a trait-to-Guna correlation table. The prompt supplies the table format inline:
+
+\begin{lstlisting}[style=plain]
+| User Trait  | Assessed Dosha | Corresponding Guna |
+|-------------|----------------|--------------------|
+| Dry Skin    | Vata           | Ruksha (Dry)       |
+| Irritability| Pitta          | Tikshna (Sharp)    |
+\end{lstlisting}
+
+\textbf{Dosha Imbalance Detector} must go past naming a dosha and describe the pathogenesis: the nature of the vitiation (\emph{Vata Prakopa}, \emph{Pitta Kshaya}), which tissues and channels are involved (\emph{Dhatus}, \emph{Srotas}), and the state of the digestive fire (\emph{Mandagni}, \emph{Tikshnagni}).
+
+\textbf{Treatment Recommender} has the longest prompt and the only safety-critical clause. It is instructed to lead with the treatment principle, then split recommendations into purification and palliative care, and it carries a mandatory string:
+
+\begin{lstlisting}[style=plain]
+Advanced procedures like Vamana, Virechana, and Basti *must* include the
+statement: "To be performed under the direct supervision of a qualified Vaidya."
+\end{lstlisting}
+
+It also branches on which Sthana the user asked about, which is the other half of the source-filtering feature:
+
+\begin{lstlisting}[style=plain]
+* Kalpa Sthana:    Focus on preparation and properties of specific herbs
+                   for Panchakarma (e.g., Madanaphala, Vacha).
+* Siddhi Sthana:   Focus on management of Panchakarma procedures and
+                   post-therapy care (Paschat Karma), like Samsarjana Krama.
+* Chikitsa Sthana: Focus on disease-specific formulations and protocols.
+\end{lstlisting}
+
+\begin{warn}[title={Safety enforcement is prompt-level only}]
+The supervision warning for Vamana, Virechana and Basti is an instruction to the model, not a post-processing check. Nothing in the code verifies that the string appears in the output before it reaches the user. The synthesis prompt asks the orchestrator to re-check it, which makes it twice as likely and still not guaranteed. A regex assertion over the final text before display would close this.
+\end{warn}
+
+\section{The orchestrator}
+
+\subsection{Routing}
+
+\code{analyze\_query} is three \code{any()} calls over lowercased substrings:
+
+\begin{lstlisting}[style=py,firstnumber=27]
+    def analyze_query(self, query: str) -> Dict:
+        query_lower = query.lower()
+        needs_prakriti = any(term in query_lower for term in
+            ['constitution', 'prakriti', 'vata', 'pitta', 'kapha', 'body type'])
+        needs_dosha = any(term in query_lower for term in
+            ['symptom', 'problem', 'pain', 'disorder', 'disease', 'sick', 'imbalance'])
+        needs_treatment = any(term in query_lower for term in
+            ['treatment', 'remedy', 'cure', 'help', 'diet', 'food', 'herb', 'medicine'])
+
+        # This no longer defaults to activating all agents. If no keywords match,
+        # it correctly signals a general, non-Ayurvedic query.
+        return {'prakriti': needs_prakriti, 'dosha': needs_dosha,
+                'treatment': needs_treatment}
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Agent} & \textbf{Trigger words} \\
+\midrule
+Prakriti & constitution, prakriti, vata, pitta, kapha, body type \\
+Dosha & symptom, problem, pain, disorder, disease, sick, imbalance \\
+Treatment & treatment, remedy, cure, help, diet, food, herb, medicine \\
+\bottomrule
+\end{tabularx}
+\caption{The complete routing vocabulary. Twenty words decide the entire execution path.}
+\end{table}
+
+The comment in the code marks a real design change --- an earlier version fired all three agents when nothing matched, and the git history shows the fix landing as \emph{``feat: Implement smart query routing in OrchestratorAgent''}. The current behaviour costs one model call for a general question instead of four.
+
+Two things follow from a substring match. First, \code{'help'} is a treatment keyword, so ``help'' anywhere in a sentence activates the treatment agent --- ``can you help me understand Ayurveda?'' takes the slow path and gets a treatment protocol it did not ask for. Second, a genuine clinical description that avoids all twenty words takes the fast path with no retrieval at all: ``I wake at 3am with a racing mind and my joints crack'' contains none of them.
+
+\subsection{The two paths}
+
+\begin{lstlisting}[style=py,firstnumber=149]
+    def simple_query(self, query: str, conversation_history: List[Dict] = None) -> Dict:
+        agent_activation   = self.analyze_query(query)
+        is_ayurvedic_query = any(agent_activation.values())
+
+        if is_ayurvedic_query:
+            # SLOW PATH: full multi-agent process
+            return self.process_query(query, agent_activation, conversation_history)
+        else:
+            # FAST PATH: bypass agents for a direct answer
+            system_prompt = ("You are AyurMind, a friendly and knowledgeable "
+                             "Ayurvedic assistant. Answer general questions "
+                             "conversationally and helpfully. ...")
+            response = self.llm_client.generate(
+                prompt=query, system_prompt=system_prompt,
+                temperature=0.4, max_tokens=2000,
+                conversation_history=conversation_history)
+            return {'query': query, 'final_response': response,
+                    'retrieved_sources': [], 'agent_activation': agent_activation}
+\end{lstlisting}
+
+Note the tone switch. The fast path is explicitly ``friendly''; the slow path's synthesis prompt explicitly forbids friendliness. The same system speaks in two registers depending on which words appeared in the question.
+
+\subsection{The cascade}
+
+\code{process\_query} runs the activated agents in a fixed order and feeds each one's output forward.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=9mm]
+  \node[blk=deepgreen, minimum width=28mm] (p) {Prakriti Agent};
+  \node[blk=deepgreen, right=26mm of p, minimum width=28mm] (d) {Dosha Agent};
+  \node[blk=deepgreen, right=26mm of d, minimum width=28mm] (t) {Treatment Agent};
+  \node[blk=clay, below=16mm of d, minimum width=44mm] (s) {Synthesis (orchestrator)};
+
+  \draw[arb=deepgreen] (p) -- node[lbl,above,align=center]{\code{Prakriti}\\\code{Assessment}} (d);
+  \draw[arb=deepgreen] (d) -- node[lbl,above,align=center]{\code{Dosha}\\\code{Imbalance}} (t);
+  \draw[arb=deepgreen] (p.south) to[out=-70,in=170] node[lbl,left,yshift=-3mm]{\code{Prakriti}} (s.west);
+  \draw[arb=clay] (d) -- (s);
+  \draw[arb=deepgreen] (t.south) to[out=-110,in=10] (s.east);
+
+  \node[db=plum, above=11mm of p, minimum width=22mm] (r1) {\scriptsize prakriti};
+  \node[db=plum, above=11mm of d, minimum width=22mm] (r2) {\scriptsize vikriti};
+  \node[db=plum, above=11mm of t, minimum width=22mm] (r3) {\scriptsize treatment};
+  \draw[arb=plum] (r1) -- (p);
+  \draw[arb=plum] (r2) -- (d);
+  \draw[arb=plum] (r3) -- (t);
+\end{tikzpicture}
+\caption{Information cascade. Each agent retrieves from its own category slice, and each downstream agent additionally receives the prose written by the ones before it.}
+\end{figure}
+
+\begin{lstlisting}[style=py,firstnumber=52]
+        if agent_activation['prakriti']:
+            prakriti_result = self.prakriti_agent.process(
+                query, base_additional_info.copy(),
+                conversation_history=conversation_history)
+            results['prakriti'] = prakriti_result['response']
+            if 'sources' in prakriti_result:
+                retrieved_sources.extend(prakriti_result['sources'])
+
+        if agent_activation['dosha']:
+            dosha_additional_info = base_additional_info.copy()
+            if 'prakriti' in results:
+                dosha_additional_info['Prakriti Assessment'] = results['prakriti']
+            dosha_result = self.dosha_agent.process(
+                query, dosha_additional_info, conversation_history)
+            results['dosha'] = dosha_result['response']
+            ...
+
+        if agent_activation['treatment']:
+            treatment_additional_info = base_additional_info.copy()
+            if 'prakriti' in results:
+                treatment_additional_info['Prakriti'] = results['prakriti']
+            if 'dosha' in results:
+                treatment_additional_info['Dosha Imbalance'] = results['dosha']
+            ...
+\end{lstlisting}
+
+The ordering is not arbitrary --- it mirrors clinical sequence. You establish the baseline constitution, then read the deviation from it, then prescribe against the deviation. The guards (\code{if 'prakriti' in results}) mean a partially activated run still works: a treatment-only query gets a treatment plan with no constitutional context, which is exactly what a bare question like ``what foods help sleep?'' deserves.
+
+Sources from all activated agents are pooled and deduplicated by chunk ID:
+
+\begin{lstlisting}[style=py,firstnumber=79]
+        # Remove duplicate sources based on 'id'
+        unique_sources = list({s['id']: s for s in retrieved_sources}.values())
+\end{lstlisting}
+
+A dictionary comprehension keyed on ID keeps the last occurrence of each. With all three agents active the pool is up to 15 chunks before dedup; the category filters make overlap unlikely, so it usually stays near 15.
+
+\subsection{Source extraction}
+
+If the user names a classical section, retrieval is narrowed to it:
+
+\begin{lstlisting}[style=py,firstnumber=14]
+    def _extract_requested_sources(self, query: str) -> Optional[str]:
+        """Extracts requested sources like 'Siddhi Sthana' using regex."""
+        match = re.search(r"(?:from|in)\s+((?:\w+\s+)?(?:Sthana|Samhita|Kalpa))",
+                          query, re.IGNORECASE)
+        if match:
+            return match.group(1)
+        # A simpler check if the above fails
+        if "siddhi sthana" in query.lower():
+            return "Siddhi Sthana"
+        if "kalpa sthana" in query.lower():
+            return "Kalpa Sthana"
+        return None
+\end{lstlisting}
+
+The regex requires a preceding \code{from} or \code{in}, so ``according to the Siddhi Sthana'' misses the pattern and is caught by the hard-coded fallback beneath it --- which covers only two of the eight sections. Whatever it extracts goes into \code{additional\_info['source\_filter']} and flows down to every activated agent.
+
+As Chapter~5 explains, the extracted string never matches the stored \code{section} value, so this feature currently narrows retrieval to nothing rather than to the requested book. It is a two-line fix in the metadata schema and worth doing, because the treatment prompt already knows how to behave differently per Sthana.
+
+\subsection{Synthesis}
+
+The last step assembles the specialists' reports plus a source list and asks for one document.
+
+\begin{lstlisting}[style=py,firstnumber=87]
+        synthesis_context = "Agent Analyses:\n\n"
+        if 'prakriti' in agent_results:
+            synthesis_context += f"CONSTITUTIONAL ASSESSMENT:\n{agent_results['prakriti']}\n\n"
+        if 'dosha' in agent_results:
+            synthesis_context += f"IMBALANCE ANALYSIS:\n{agent_results['dosha']}\n\n"
+        if 'treatment' in agent_results:
+            synthesis_context += f"TREATMENT RECOMMENDATIONS:\n{agent_results['treatment']}\n\n"
+
+        source_context = ("The following sources from Ayurvedic texts were "
+                          "consulted by the agents:\n")
+        for i, source in enumerate(retrieved_sources, 1):
+            metadata = source.get('metadata', {})
+            source_ref = (f"{metadata.get('section', 'Unknown Section')} - "
+                          f"{metadata.get('chapter', 'Unknown Chapter')}")
+            source_context += f"- Source {i}: {source_ref}\n"
+\end{lstlisting}
+
+The synthesis system prompt does two jobs. First, a silent review pass that is explicitly excluded from the output:
+
+\begin{lstlisting}[style=plain]
+**BACKGROUND VERIFICATION (DO NOT print in output):**
+1. Clinical Consistency (Yukti): Ensure the Vikriti analysis aligns logically
+   with the Chikitsa plan. A diagnosis of 'Ama' accumulation must be followed
+   by 'Deepana-Pachana' recommendations. A Kapha-dominant Vikriti should not
+   have Kapha-aggravating foods in the diet plan.
+2. Textual Accuracy (Shastra): If a specific text was referenced, confirm the
+   recommendations are consistent with that classical source.
+3. Safety (Ahimsa): Double-check that all Shodhana procedures include a clear
+   and non-negotiable warning requiring qualified supervision.
+\end{lstlisting}
+
+Second, a fixed four-section report skeleton:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}c l X@{}}
+\toprule
+\textbf{\#} & \textbf{Heading} & \textbf{Required content} \\
+\midrule
+1 & Provisional Diagnosis & Prakriti baseline, then Vikriti with dominant doshas, Gunas, Samprapti, affected Dhatus and Srotas \\
+2 & Treatment Protocol & Chikitsa Sutra, Shodhana with safety warnings, Shamana split into classical formulations and single herbs \\
+3 & Dietary \& Lifestyle & Pathya and Apathya lists, each with justification \\
+4 & Clinical Summary & Practitioner-to-practitioner precis \\
+\bottomrule
+\end{tabularx}
+\caption{The report structure the synthesis prompt enforces. Section numbering and headings are dictated verbatim.}
+\end{table}
+
+The call itself runs cooler and longer than any agent call:
+
+\begin{lstlisting}[style=py,firstnumber=147]
+        return self.llm_client.generate(prompt=synthesis_prompt,
+                                        system_prompt=system_prompt,
+                                        temperature=self.temperature,   # 0.2
+                                        max_tokens=4000,
+                                        conversation_history=conversation_history)
+\end{lstlisting}
+
+\section{A full slow-path trace}
+
+Putting it together for the query \emph{``I have acid reflux, skin rashes, and a short temper. What should I do?''}:
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1mm,y=1mm,font=\scriptsize]
+  % lifelines
+  \foreach \x/\n in {0/UI, 28/Orch, 60/Agents, 96/Chroma, 128/LLM} {
+    \node[blk=slate, minimum width=20mm, font=\scriptsize] at (\x,0) {\n};
+    \draw[lifeline] (\x,-4) -- (\x,-104);
+  }
+
+  % messages
+  \draw[arb=clay]      (0,-10)  -- (28,-10)  node[midway,above,font=\tiny]{query};
+  \node[right,font=\tiny\itshape,color=slate] at (30,-16) {analyze\_query -> \{p:T, d:F, t:T\}};
+
+  \draw[arb=deepgreen] (28,-24) -- (60,-24) node[midway,above,font=\tiny]{prakriti.process};
+  \draw[arb=plum]      (60,-30) -- (96,-30) node[midway,above,font=\tiny]{where category=prakriti};
+  \draw[arb=plum,dashed](96,-36) -- (60,-36) node[midway,above,font=\tiny]{5 chunks};
+  \draw[arb=brick]     (60,-42) -- (128,-42) node[midway,above,font=\tiny]{prompt + context, T=0.3};
+  \draw[arb=brick,dashed](128,-48) -- (60,-48) node[midway,above,font=\tiny]{Pitta-dominant};
+  \draw[arb=deepgreen,dashed](60,-54) -- (28,-54);
+
+  \draw[arb=deepgreen] (28,-62) -- (60,-62) node[midway,above,font=\tiny,align=center]{treatment.process\\+ Prakriti};
+  \draw[arb=plum]      (60,-68) -- (96,-68) node[midway,above,font=\tiny]{where category=treatment};
+  \draw[arb=plum,dashed](96,-74) -- (60,-74) node[midway,above,font=\tiny]{5 chunks};
+  \draw[arb=brick]     (60,-80) -- (128,-80) node[midway,above,font=\tiny]{prompt + context, T=0.4};
+  \draw[arb=brick,dashed](128,-86) -- (60,-86);
+  \draw[arb=deepgreen,dashed](60,-90) -- (28,-90);
+
+  \draw[arb=clay]      (28,-96) -- (128,-96) node[midway,above,font=\tiny]{synthesis, T=0.2, 4000 tok};
+  \draw[arb=clay,dashed](128,-101) -- (0,-101) node[midway,above,font=\tiny]{four-section report};
+\end{tikzpicture}
+\caption{Slow path with two agents active. The dosha agent is skipped because no word in the query matches its trigger list --- ``acid reflux'' and ``rashes'' are not in the vocabulary, though a clinician would call them symptoms.}
+\end{figure}
+
+That trace also shows the routing weakness concretely. The query describes symptoms, but the word \emph{symptom} does not appear, so the diagnostic agent never runs and the treatment plan is built on a constitutional assessment with no imbalance analysis behind it.
+
+\section{Cost of one consultation}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}l c c c@{}}
+\toprule
+\textbf{Path} & \textbf{Retrievals} & \textbf{LLM calls} & \textbf{Requested output tokens} \\
+\midrule
+Fast path & 0 & 1 & 2,000 \\
+One agent + synthesis & 1 & 2 & 3,000 + 4,000 \\
+Two agents + synthesis & 2 & 3 & 6,000 + 4,000 \\
+All three + synthesis & 3 & 4 & 9,000 + 4,000 \\
+\bottomrule
+\end{tabular}
+\caption{Per-query cost. Calls are sequential, not parallel --- the cascade requires it, since each agent's input includes the previous one's output.}
+\end{table}
+
+The sequential dependency is real for dosha and treatment, which consume upstream findings. Prakriti and dosha could in principle run concurrently against a query where the treatment agent is inactive, but the code does not attempt it.

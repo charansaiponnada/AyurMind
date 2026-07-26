@@ -1,0 +1,160 @@
+\chapter{The Interface}
+
+\fpath{src/ui/gradio\_app.py} is 171 lines and does three things: constructs every object in the system, defines one chat handler, and lays out a Gradio Blocks page.
+
+\section{Wiring}
+
+\code{AyurMindApp.\_\_init\_\_} is the composition root. Nothing else in the codebase constructs the full object graph, which is why the evaluation scripts each rebuild it by hand.
+
+\begin{lstlisting}[style=py,firstnumber=43]
+        # Initialize RAG components
+        self.vectorstore         = AyurvedicVectorStore()
+        self.embedding_generator = EmbeddingGenerator()
+        self.retriever           = RAGRetriever(self.vectorstore, self.embedding_generator)
+
+        # ... provider selection (see chapter 6) ...
+
+        # Initialize agents
+        self.prakriti_agent  = PrakritiAgent(self.retriever, self.llm_client)
+        self.dosha_agent     = DoshaAgent(self.retriever, self.llm_client)
+        self.treatment_agent = TreatmentAgent(self.retriever, self.llm_client)
+
+        # Initialize orchestrator
+        self.orchestrator = OrchestratorAgent(
+            self.prakriti_agent, self.dosha_agent,
+            self.treatment_agent, self.llm_client)
+\end{lstlisting}
+
+One retriever and one LLM client are shared across all four agents. The embedding model loads once here, at construction, which is why the first startup after a fresh install pauses for a while --- \code{SentenceTransformer} is downloading roughly 420~MB of weights.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=8mm]
+  \node[blk=clay, minimum width=34mm] (app) {AyurMindApp};
+
+  \node[blk=plum, below left=13mm and 6mm of app, minimum width=28mm] (vs) {VectorStore};
+  \node[blk=plum, below=13mm of app, minimum width=28mm] (eg) {EmbeddingGen};
+  \node[blk=plum, below right=13mm and 6mm of app, minimum width=28mm] (llm) {LLM client};
+
+  \node[blk=deepgreen, below=13mm of eg, minimum width=28mm] (rr) {RAGRetriever};
+
+  \node[blk=midgreen, below left=13mm and 14mm of rr, minimum width=22mm] (a1) {Prakriti};
+  \node[blk=midgreen, below=13mm of rr, minimum width=22mm] (a2) {Dosha};
+  \node[blk=midgreen, below right=13mm and 14mm of rr, minimum width=22mm] (a3) {Treatment};
+
+  \node[blk=clay, below=13mm of a2, minimum width=32mm] (orc) {Orchestrator};
+
+  \draw[ar] (app) -- (vs);
+  \draw[ar] (app) -- (eg);
+  \draw[ar] (app) -- (llm);
+  \draw[ar] (vs) -- (rr);
+  \draw[ar] (eg) -- (rr);
+  \draw[ar] (rr) -- (a1);
+  \draw[ar] (rr) -- (a2);
+  \draw[ar] (rr) -- (a3);
+  \draw[ar] (a1) -- (orc);
+  \draw[ar] (a2) -- (orc);
+  \draw[ar] (a3) -- (orc);
+  \draw[ar, dashed, draw=plum] (llm.east) to[out=0,in=0] node[lbl,right]{shared by all four agents} (orc.east);
+\end{tikzpicture}
+\caption{Construction order. Dependencies are passed in explicitly --- there is no service locator or DI container, just constructor arguments.}
+\end{figure}
+
+\section{The chat handler}
+
+\begin{lstlisting}[style=py,firstnumber=100]
+    def chat(self, message: str, history: list):
+        history = history or []
+
+        if not message.strip():
+            return history
+
+        try:
+            history.append({"role": "user", "content": message})
+
+            response = self.orchestrator.simple_query(message, history)
+
+            # Extract the final_response text from the dictionary
+            response_text = response.get('final_response', str(response))
+
+            history.append({"role": "assistant", "content": response_text})
+            return history
+
+        except Exception as e:
+            history.append({"role": "assistant",
+                            "content": f"Error: {str(e)}. Please try again."})
+            return history
+\end{lstlisting}
+
+Three things worth noticing.
+
+The handler returns the whole history list rather than a single string, so it uses Gradio's message-dictionary chat format. The \code{gr.Chatbot} widget is created without \code{type="messages"}, which means the app depends on the installed Gradio version defaulting to that format. \fpath{requirements.txt} pins \code{gradio} without a version, so a different Gradio release can change the default underneath you. Passing \code{type="messages"} explicitly would make this independent of the version.
+
+The user message is appended \emph{before} the orchestrator call, which is the behaviour the OpenRouter and Ollama clients expect (they drop the last turn) and the behaviour that makes Google and OpenAI duplicate it. See the note in Chapter~6.
+
+Errors are caught and rendered into the transcript rather than raised. A blown API quota shows up as a message in the chat window, and \code{git log} records this as a deliberate change --- the commit \emph{``fix: statless chat''} was part of the same series that reworked history handling.
+
+\begin{note}[title={What the UI throws away}]
+\code{simple\_query} returns a four-key dictionary: \code{final\_response}, \code{retrieved\_sources}, \code{agent\_activation}, and on the slow path \code{agent\_responses} with each specialist's individual report. The handler reads exactly one key and discards the rest. The citation list the orchestrator carefully deduplicated never reaches the screen, and neither does any indication of which agents ran. Surfacing \code{retrieved\_sources} in an accordion beneath each answer would be a small change with a large effect on the interpretability score the evaluation framework asks experts to rate.
+\end{note}
+
+\section{Layout}
+
+\begin{lstlisting}[style=py,firstnumber=128]
+    def create_interface(self):
+        with gr.Blocks(title="AyurMind") as interface:
+            gr.HTML('<div style="text-align:center; padding:2rem; background: '
+                    'linear-gradient(135deg, #667eea 0%, #764ba2 100%); '
+                    'color:white; border-radius:10px;"><h1>AyurMind</h1>'
+                    '<p>AI-Powered Ayurvedic Consultation</p></div>')
+
+            gr.HTML('<div style="background:#fff3cd; border:1px solid #ffc107; ...">'
+                    '<strong>Disclaimer:</strong> Educational only. '
+                    'Not medical advice. Consult professionals.</div>')
+
+            chatbot = gr.Chatbot(height=500, label="Consultation")
+
+            with gr.Row():
+                msg    = gr.Textbox(label="Your Question",
+                                    placeholder="Describe your concern...", scale=4)
+                submit = gr.Button("Send", variant="primary", scale=1)
+
+            clear = gr.Button("Clear")
+
+            gr.Examples(examples=[["I have digestive issues and anxiety"],
+                                  ["What is Vata constitution?"],
+                                  ["Foods for better sleep?"]], inputs=msg)
+\end{lstlisting}
+
+Both HTML blocks use inline styles rather than Gradio theming, which keeps the file self-contained at the cost of being unthemeable.
+
+The three examples are chosen to exercise different routes: the first activates dosha (\code{problem}? no --- but \code{digestive issues} contains no keyword; it is \code{anxiety} that also contains none, so this one actually takes the \textbf{fast path}), the second activates prakriti via \code{constitution} and \code{vata}, the third activates treatment via \code{food}. The first example is a good illustration of the substring-matching limitation described in Chapter~\ref{ch:agents}: the flagship demo query does not reach the multi-agent pipeline.
+
+\section{Event wiring}
+
+\begin{lstlisting}[style=py,firstnumber=147]
+            msg.submit(self.chat, [msg, chatbot], [chatbot])
+            submit.click(self.chat, [msg, chatbot], [chatbot]).then(lambda: "", None, [msg])
+            msg.submit(lambda: "", None, [msg])
+            clear.click(lambda: None, None, [chatbot])
+\end{lstlisting}
+
+Pressing Enter and clicking Send take different routes to the same result. The button chains a \code{.then()} to clear the textbox after the response arrives; Enter registers a second, independent \code{submit} handler that clears the box immediately. Two handlers on the same event fire in registration order, so the visible difference is when the input clears --- instantly on Enter, after the answer on Send. Collapsing both into the \code{.then()} form would make them consistent.
+
+\section{Launching}
+
+\begin{lstlisting}[style=py,firstnumber=154]
+    def launch(self, share: bool = None, server_port: int = None):
+        if share is None:
+            share = os.getenv("GRADIO_SHARE", "false").lower() == "true"
+        if server_port is None:
+            server_port = int(os.getenv("GRADIO_PORT", "7860"))
+
+        # Use 0.0.0.0 when sharing so the public link works
+        server_name = "0.0.0.0" if share else "127.0.0.1"
+
+        interface = self.create_interface()
+        interface.launch(share=share, server_port=server_port, server_name=server_name)
+\end{lstlisting}
+
+The bind address is derived from \code{share} rather than being configurable on its own. Locally that is sensible --- it avoids exposing the app on your LAN by accident. Inside a container it is the cause of a real bug, covered in the next chapter.

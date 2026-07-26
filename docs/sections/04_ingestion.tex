@@ -1,0 +1,317 @@
+\chapter{The Knowledge Pipeline}
+
+Two classes turn a MediaWiki site into a searchable corpus. \code{CharakaScraper} downloads and strips HTML; \code{AyurvedicTextProcessor} cleans, splits, and tags the result. They run back to back inside \fpath{scripts/01\_scrape\_data.py}.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=7mm]
+  \node[blk=slate, minimum width=25mm, align=center] (web) {carakasamhita\\online.com};
+  \node[blk=clay, right=11mm of web, minimum width=27mm, align=center] (scr) {CharakaScraper\\\scriptsize fetch + strip};
+  \node[blk=slate, right=11mm of scr, minimum width=25mm, align=center] (raw) {\texttt{data/raw/}\\\scriptsize .html + .txt};
+  \node[blk=clay, below=11mm of raw, minimum width=27mm, align=center] (proc) {TextProcessor\\\scriptsize clean + chunk + tag};
+  \node[blk=slate, left=11mm of proc, minimum width=27mm, align=center] (chunks) {\texttt{all\_chunks.json}\\\scriptsize \textasciitilde 800 tokens each};
+  \node[blk=plum, left=11mm of chunks, minimum width=25mm, align=center] (emb) {Embedding\\\scriptsize 768-dim vectors};
+  \node[db=plum, below=11mm of emb, minimum width=32mm] (db) {ChromaDB\\\scriptsize ayurvedic\_texts};
+
+  \draw[arb=clay] (web) -- node[lbl,above]{HTTP} (scr);
+  \draw[arb=clay] (scr) -- (raw);
+  \draw[arb=clay] (raw) -- (proc);
+  \draw[arb=clay] (proc) -- (chunks);
+  \draw[arb=plum] (chunks) -- (emb);
+  \draw[arb=plum] (emb) -- (db);
+
+  \node[font=\scriptsize\itshape, color=slate, above=1mm of scr] {step 01};
+  \node[font=\scriptsize\itshape, color=slate, below=1mm of proc] {step 01};
+  \node[font=\scriptsize\itshape, color=slate, above=1mm of emb] {step 02};
+\end{tikzpicture}
+\caption{Ingestion, end to end. The first three boxes run once; the Chroma collection is what the application actually queries.}
+\end{figure}
+
+\section{Scraping}
+
+\subsection{The section table}
+
+The eight books of the Charaka Samhita are hard-coded as a class attribute. Each entry carries a display name, the MediaWiki URL, and a Roman numeral used later as \code{section\_code} metadata.
+
+\begin{lstlisting}[style=py,firstnumber=34]
+    SECTIONS = {
+        "Sutra_Sthana": {
+            "name": "Section on Fundamental Principles",
+            "url": "https://www.carakasamhitaonline.com/index.php?title=Sutra_Sthana",
+            "code": "I"
+        },
+        "Nidana_Sthana": {
+            "name": "Section on Diagnostic Principles",
+            "url": "https://www.carakasamhitaonline.com/index.php?title=Nidana_Sthana",
+            "code": "II"
+        },
+        # ... Vimana III, Sharira IV, Indriya V,
+        #     Chikitsa VI, Kalpa VII, Siddhi VIII
+    }
+\end{lstlisting}
+
+The mapping matters downstream. When a user writes ``according to the Siddhi Sthana'', the orchestrator extracts that phrase and filters retrieval on the \code{section} metadata field, which is populated from \code{name} in this table.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}c l X@{}}
+\toprule
+\textbf{Code} & \textbf{Sthana} & \textbf{Subject} \\
+\midrule
+I    & Sutra    & Fundamental principles: doshas, tastes, daily routine \\
+II   & Nidana   & Diagnostics: causes and premonitory signs of disease \\
+III  & Vimana   & Specific medical principles, including constitutional examination \\
+IV   & Sharira  & Embryology, anatomy, formation of Prakriti at conception \\
+V    & Indriya  & Prognosis read from sensory signs \\
+VI   & Chikitsa & Therapeutics: disease-specific management \\
+VII  & Kalpa    & Pharmaceutics: preparation of Panchakarma substances \\
+VIII & Siddhi   & Procedure management and post-therapy care \\
+\bottomrule
+\end{tabularx}
+\caption{The eight sections and what each contributes to the corpus.}
+\end{table}
+
+\subsection{Fetching}
+
+\code{fetch\_page} is deliberately slow. It sleeps \code{REQUEST\_DELAY} seconds after every successful request and doubles that on retry, then gives up after \code{MAX\_RETRIES}. The User-Agent identifies the crawler.
+
+\begin{lstlisting}[style=py,firstnumber=95]
+    def fetch_page(self, url: str) -> Tuple[str, bool]:
+        for attempt in range(self.max_retries):
+            try:
+                response = self.session.get(url, timeout=self.timeout)
+                response.raise_for_status()
+                time.sleep(self.delay)          # Be respectful to the server
+                return response.text, True
+            except requests.RequestException as e:
+                logger.warning(f"Attempt {attempt + 1} failed for {url}: {e}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.delay * 2)  # Longer delay on retry
+        logger.error(f"Failed to fetch {url} after {self.max_retries} attempts")
+        return "", False
+\end{lstlisting}
+
+The function returns a \code{(text, ok)} tuple rather than raising, so a single dead chapter logs a warning and the run continues. That is why a completed scrape can still be missing chapters --- check \code{total\_chapters} in \code{scraping\_summary.json} against what the site lists.
+
+\subsection{Finding chapter links}
+
+There is no sitemap, so chapters are discovered by scanning every anchor inside the MediaWiki content div and keeping the ones that look like article links:
+
+\begin{lstlisting}[style=py,firstnumber=133]
+        content_div = soup.find('div', {'id': 'mw-content-text'})
+        if content_div:
+            links = content_div.find_all('a', href=True)
+            for link in links:
+                href  = link.get('href', '')
+                title = link.get_text(strip=True)
+                # Filter for actual chapter links
+                if href.startswith('/index.php?title=') and len(title) > 10:
+                    if any(skip in title.lower()
+                           for skip in ['main page', 'category', 'help', 'search']):
+                        continue
+                    chapters.append({'title': title, 'url': f"{base_url}{href}"})
+\end{lstlisting}
+
+Two heuristics carry the whole thing: the href prefix, and a link text longer than ten characters. Both are guesses about how the site is built. If carakasamhitaonline.com changes its markup, \code{extract\_chapter\_links} returns an empty list, the section directory gets an \code{index.html} and nothing else, and the run reports success. That silent failure is the most likely way a fresh scrape produces a thin corpus.
+
+\subsection{What lands on disk}
+
+\begin{lstlisting}[style=plain]
+data/raw/
+|-- scraping_summary.json          totals across all 8 sections
+|-- Sutra_Sthana/
+|   |-- index.html   index.txt     the section landing page
+|   |-- chapter_01.html  chapter_01.txt
+|   |-- chapter_02.html  chapter_02.txt
+|   |-- ...
+|   `-- metadata.json              per-chapter titles, URLs, word counts
+|-- Nidana_Sthana/
+`-- ...
+\end{lstlisting}
+
+Both HTML and plain text are kept. The text is what feeds the processor; the HTML is insurance against needing to re-extract without re-crawling.
+
+\section{Cleaning and chunking}
+
+\subsection{Why 800 and 200}
+
+\code{AyurvedicTextProcessor} defaults to 800-token chunks with 200 tokens of overlap, counted with \code{tiktoken}'s \code{cl100k\_base} encoding. Eight hundred tokens is roughly two or three verses plus their commentary --- enough that a retrieved passage carries its own explanation. The 200-token overlap means a statement that straddles a boundary still appears whole in one of the two neighbouring chunks.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1mm,y=1mm]
+  % chapter bar
+  \fill[palegrey] (0,27) rectangle (150,35);
+  \node[font=\scriptsize\itshape,color=slate] at (75,37.5) {one chapter, split at sentence boundaries};
+
+  % chunk 1
+  \fill[midgreen!25, draw=midgreen, line width=0.8pt] (0,12) rectangle (60,19);
+  \node[font=\scriptsize] at (30,15.5) {chunk 0 \quad 800 tok};
+  % chunk 2
+  \fill[clay!22, draw=clay, line width=0.8pt] (45,2) rectangle (105,9);
+  \node[font=\scriptsize] at (75,5.5) {chunk 1 \quad 800 tok};
+  % chunk 3
+  \fill[plum!20, draw=plum, line width=0.8pt] (90,-8) rectangle (150,-1);
+  \node[font=\scriptsize] at (120,-4.5) {chunk 2 \quad 800 tok};
+
+  % overlap braces
+  \draw[decorate,decoration={brace,amplitude=3pt},color=slate] (60,20.5) -- (45,20.5);
+  \node[font=\scriptsize,color=slate] at (52.5,23.5) {200 tok overlap};
+  \draw[decorate,decoration={brace,amplitude=3pt},color=slate] (105,10.5) -- (90,10.5);
+  \node[font=\scriptsize,color=slate] at (97.5,13.5) {200 tok overlap};
+
+  % overlap hatch
+  \fill[pattern=north east lines, pattern color=slate!45] (45,12) rectangle (60,19);
+  \fill[pattern=north east lines, pattern color=slate!45] (90,2) rectangle (105,9);
+\end{tikzpicture}
+\vspace{4mm}
+\caption{The overlap window. Hatched regions are duplicated between neighbouring chunks, so a sentence never falls into the gap between two retrievable passages.}
+\end{figure}
+
+\subsection{The chunking loop}
+
+Text is split into sentences with a lookbehind regex, then sentences are accumulated until the token budget is hit. The interesting part is what happens at the boundary --- the loop walks backwards through the chunk it just closed, collecting whole sentences until it has 200 tokens of context, and seeds the next chunk with them.
+
+\begin{lstlisting}[style=py,firstnumber=134]
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+
+        current_chunk  = []
+        current_tokens = 0
+        chunk_id       = 0
+
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            sentence_tokens = self.count_tokens(sentence)
+
+            # Check if adding this sentence exceeds chunk size
+            if current_tokens + sentence_tokens > self.chunk_size and current_chunk:
+                chunks.append({
+                    'chunk_id':    chunk_id,
+                    'text':        ' '.join(current_chunk),
+                    'token_count': current_tokens,
+                    'metadata':    metadata.copy()
+                })
+                chunk_id += 1
+
+                # Start new chunk with overlap: keep trailing sentences
+                overlap_sentences, overlap_tokens = [], 0
+                for sent in reversed(current_chunk):
+                    sent_tokens = self.count_tokens(sent)
+                    if overlap_tokens + sent_tokens <= self.chunk_overlap:
+                        overlap_sentences.insert(0, sent)
+                        overlap_tokens += sent_tokens
+                    else:
+                        break
+
+                current_chunk  = overlap_sentences
+                current_tokens = overlap_tokens
+
+            current_chunk.append(sentence)
+            current_tokens += sentence_tokens
+\end{lstlisting}
+
+Because overlap is measured in whole sentences, the actual overlap is usually a little under 200 tokens --- the loop stops as soon as the next sentence backwards would exceed the budget. A chunk is never split mid-sentence, which is the point.
+
+\begin{warn}[title={The sentence splitter and Sanskrit transliteration}]
+\code{re.split(r'(?<=[.!?])\textbackslash s+', text)} treats every period as a sentence end. Transliterated Sanskrit and the site's verse numbering (``Ch.~Su.~1.42'') contain periods that are not sentence boundaries, so some chunks begin mid-citation. The overlap window softens this but does not eliminate it.
+\end{warn}
+
+\subsection{Cleaning}
+
+\code{clean\_text} runs before chunking and does four things: collapses runs of three or more newlines to two, collapses multiple spaces to one, deletes \code{[Page N]} markers and bare numeric lines, and normalises curly quotes to straight ones.
+
+\begin{lstlisting}[style=py,firstnumber=69]
+        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        text = re.sub(r'  +', ' ', text)
+        text = re.sub(r'\[Page \d+\]', '', text)
+        text = re.sub(r'^\d+\s*$', '', text, flags=re.MULTILINE)
+\end{lstlisting}
+
+\section{Metadata: the four keys everything depends on}
+
+Each chunk carries a metadata dictionary. Four keys are load-bearing:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Key} & \textbf{Example} & \textbf{Used for} \\
+\midrule
+\code{section} & \code{"Section on Therapeutic Principles"} & Source filtering when a user names a Sthana; printed in every citation \\
+\code{section\_code} & \code{"VI"} & Not queried, kept for reference \\
+\code{chapter} & \code{"Jvara Chikitsa"} & Second half of every citation line \\
+\code{category} & \code{"treatment"} & \textbf{The agent routing key.} Each specialist filters on exactly one value \\
+\bottomrule
+\end{tabularx}
+\caption{Chunk metadata. \code{category} is what makes the three agents see three different corpora.}
+\end{table}
+
+\subsection{How categories are assigned}
+\label{sec:categorise}
+
+\code{categorize\_content} is a keyword cascade over the lowercased chunk text, with a fall-through to section-based assignment:
+
+\begin{lstlisting}[style=py,firstnumber=226]
+        text_lower = text.lower()
+
+        # Prakriti-related content
+        if any(term in text_lower for term in
+               ['vata', 'pitta', 'kapha', 'constitution', 'prakriti']):
+            return 'prakriti'
+
+        # Vikriti/Disease content
+        if any(term in text_lower for term in
+               ['disease', 'symptom', 'disorder', 'imbalance', 'dosha']):
+            return 'vikriti'
+
+        # Treatment content
+        if any(term in text_lower for term in
+               ['treatment', 'therapy', 'remedy', 'herb', 'diet', 'lifestyle']):
+            return 'treatment'
+
+        # Default to section-based categorization
+        if 'chikitsa' in section_name.lower():
+            return 'treatment'
+        elif 'nidana' in section_name.lower() or 'vimana' in section_name.lower():
+            return 'vikriti'
+        else:
+            return 'general'
+\end{lstlisting}
+
+Order decides everything, and the order is not neutral. The three dosha names are in the first test, and the three dosha names appear on a large share of pages in any Ayurvedic text. A passage from the Chikitsa Sthana that reads ``for aggravated Vata, administer Basti'' contains \code{vata} and so is tagged \code{prakriti} --- not \code{treatment} --- even though it is a treatment instruction sitting in the therapeutics book. The treatment agent, which filters on \code{category == "treatment"}, will never retrieve it.
+
+\begin{bug}[title={Consequence: the treatment corpus is smaller than it looks}]
+Because \code{prakriti} is tested first and its keywords are the most common words in the corpus, the \code{prakriti} bucket absorbs passages that belong to the other two agents. Run the category breakdown printed at the end of step 1 and check the split before drawing conclusions about agent quality. A more balanced assignment would score all three keyword sets and pick the highest, or tag chunks with multiple categories and use Chroma's \code{\$in} operator at query time.
+\end{bug}
+
+\section{Output of the processing stage}
+
+\code{process\_all()} writes two files. \code{all\_chunks.json} is a flat list of every chunk:
+
+\begin{lstlisting}[style=json]
+[
+  {
+    "chunk_id": 0,
+    "text": "Vata is characterised by the qualities ruksha, laghu, sheeta ...",
+    "token_count": 782,
+    "metadata": {
+      "section":        "Section on Fundamental Principles",
+      "section_code":   "I",
+      "chapter":        "Deerghanjiviteeya Adhyaya",
+      "chapter_number": 1,
+      "source_url":     "https://www.carakasamhitaonline.com/index.php?title=...",
+      "source_file":    "chapter_01.txt",
+      "source_path":    "data/raw/Sutra_Sthana/chapter_01.txt",
+      "category":       "prakriti"
+    }
+  }
+]
+\end{lstlisting}
+
+\code{processing\_summary.json} holds the totals, the per-section chunk and token counts, and the category histogram. The README estimates 5,000--8,000 chunks for the full corpus.

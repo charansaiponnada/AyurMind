@@ -1,0 +1,76 @@
+\chapter{What AyurMind Is}
+
+AyurMind answers health questions in the vocabulary of classical Ayurveda, and it tries to answer them from a book rather than from memory. The book is the Charaka Samhita, scraped from \href{https://www.carakasamhitaonline.com}{carakasamhitaonline.com}, cut into roughly 800-token passages, embedded with a sentence-transformer model, and stored in a local ChromaDB collection called \code{ayurvedic\_texts}. When you ask a question, the system searches that collection, hands the matching passages to a language model along with a role-specific instruction, and assembles the answers into a consultation report.
+
+The part that makes it more than a plain retrieval chatbot is the split into four roles. Three specialist agents each own one clinical task and each search a different slice of the corpus. A fourth agent, the orchestrator, decides which specialists to wake up, feeds each one's output into the next, and writes the final report. A question about diet alone touches one agent; a question describing symptoms, constitution, and a request for a remedy touches all three.
+
+\section{The problem it targets}
+
+Two things go wrong when a general-purpose language model is asked an Ayurvedic question. It invents plausible-sounding Sanskrit that has no textual basis, and it flattens the distinction between constitution (\emph{Prakriti}, what you were born with) and current imbalance (\emph{Vikriti}, what is wrong right now). A treatment that ignores that distinction can be actively wrong: a warming, oily regimen that settles Vata will aggravate a Pitta patient.
+
+The design responds to both. Grounding is handled by retrieval --- every specialist prompt carries retrieved passages and the model is told to answer from them. The Prakriti/Vikriti distinction is handled structurally, by giving each concept its own agent, its own system prompt, and its own metadata filter over the corpus.
+
+\section{Who the output is written for}
+
+The system prompts are unusually specific about audience. All three specialists and the orchestrator are told they are addressing BAMS graduates and practitioners, and are instructed to use Sanskrit clinical terminology, cite the classical section a recommendation comes from, and drop conversational framing. From \fpath{src/agents/orchestrator.py}:
+
+\begin{lstlisting}[style=plain]
+- Precision over Personability: Prioritize clinical accuracy and detailed
+  explanations over conversational pleasantries. Avoid "friendly" or
+  "approachable" language. Do not use phrasings like "Let me explain..."
+\end{lstlisting}
+
+That choice explains a lot of the code. It is why the synthesis prompt enforces a four-heading report structure, why the treatment agent must attach a supervision warning to any Panchakarma procedure, and why the evaluation harness asks BAMS practitioners rather than crowdworkers to score the outputs.
+
+\section{The two paths through the system}
+
+Every query hits \code{OrchestratorAgent.simple\_query()}, which does a keyword scan and then picks one of two routes.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=8mm]
+  \node[blk=slate, minimum width=34mm] (q) {User query};
+  \node[dia=clay, below=7mm of q, text width=26mm] (d) {any Ayurvedic\\keyword?};
+  \node[blk=midgreen, right=22mm of d, minimum width=44mm, align=left] (fast)
+       {\textbf{Fast path}\\1 LLM call, no retrieval\\temperature 0.4, 2000 tokens};
+  \node[blk=deepgreen, below=13mm of d, minimum width=64mm, align=left] (slow)
+       {\textbf{Slow path}\\1--3 retrievals + 1--3 agent calls\\plus 1 synthesis call\\temperature 0.2 for synthesis, 4000 tokens};
+  \node[blk=slate, below=8mm of slow, minimum width=34mm] (out) {Response text};
+
+  \draw[ar] (q) -- (d);
+  \draw[arb=midgreen] (d) -- node[lbl,above]{no} (fast);
+  \draw[arb=deepgreen] (d) -- node[lbl,right]{yes} (slow);
+  \draw[ar] (slow) -- (out);
+  \draw[ar] (fast.south) |- (out.east);
+\end{tikzpicture}
+\caption{Query routing. The keyword scan in \code{analyze\_query()} is the only gate; there is no model-based classifier.}
+\end{figure}
+
+The fast path exists for cost and latency. Asking ``what is Ayurveda?'' does not need three retrievals and four model calls, so it gets one call with a short, friendly system prompt. Everything else --- anything mentioning a dosha, a symptom, or a remedy --- takes the slow path.
+
+\section{Technology in one table}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Concern} & \textbf{Choice} & \textbf{Where it lives} \\
+\midrule
+Source text & Charaka Samhita, 8 sections & \fpath{src/scraper/charaka\_scraper.py} \\
+Chunking & 800 tokens, 200 overlap, \code{cl100k\_base} & \fpath{src/scraper/data\_processor.py} \\
+Embeddings & \code{all-mpnet-base-v2} (768-dim) & \fpath{src/rag/embeddings.py} \\
+Vector store & ChromaDB, persistent on disk & \fpath{src/rag/vectorstore.py} \\
+Default LLM & Gemini \code{gemini-1.5-flash} & \fpath{src/llm/google\_client.py} \\
+Alternate LLMs & OpenAI, OpenRouter, Ollama & \fpath{src/llm/} \\
+Agents & 3 specialists + 1 orchestrator & \fpath{src/agents/} \\
+Interface & Gradio Blocks, port 7860 & \fpath{src/ui/gradio\_app.py} \\
+Packaging & Dockerfile + compose, HF Spaces & \fpath{Dockerfile}, \fpath{app.py} \\
+\bottomrule
+\end{tabularx}
+\caption{The stack as the code actually configures it.}
+\end{table}
+
+\begin{warn}[title={The README describes an older design}]
+\fpath{README.md} names OpenRouter as the primary LLM provider, lists LangChain as the RAG framework, and shows Sushruta Samhita and Ashtanga Hridaya in the knowledge base. None of those are true of the current code: the default provider is Google Gemini, \code{langchain} is never imported despite being pinned in \fpath{requirements.txt}, and the scraper only covers Charaka. Chapter~\ref{ch:gaps} lists every divergence with the file that proves it. Read that chapter before trusting the README.
+\end{warn}

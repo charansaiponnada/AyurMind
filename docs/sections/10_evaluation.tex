@@ -1,0 +1,263 @@
+\chapter{The Evaluation Harness}
+\label{ch:eval}
+
+The \fpath{evaluation/} directory holds a comparison framework built for the conference submission. It runs three systems over the same 40 cases, computes two metrics automatically, and generates spreadsheets for BAMS practitioners to score the rest by hand.
+
+\section{The dataset}
+
+\fpath{evaluation/dataset/evaluation\_cases.csv} has 40 rows and seven columns.
+
+\begin{lstlisting}[style=plain]
+id,scenario,ground_truth_prakriti,complexity_level,query_type,expected_agents,notes
+1,"I've been feeling very anxious and my skin is dry. I have trouble sleeping
+   and my mind is always racing. What could be the reason?",
+   Vata,Simple,Diagnostic,prakriti+dosha,Basic Vata symptoms
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Column} & \textbf{Meaning} \\
+\midrule
+\code{scenario} & The user turn, written in lay language \\
+\code{ground\_truth\_prakriti} & Expected constitutional label, or \code{Unknown} / \code{Multiple} \\
+\code{complexity\_level} & Simple (16), Medium (17), Complex (7) \\
+\code{query\_type} & Diagnostic, Treatment, Educational, Seasonal, Pediatric, Geriatric, Pregnancy, Athletic, Travel-related, Mental health, and others \\
+\code{expected\_agents} & Which specialists should fire, e.g.\ \code{prakriti+dosha+treatment} \\
+\code{notes} & One-line rationale for the case \\
+\bottomrule
+\end{tabularx}
+\caption{Dataset schema. \code{expected\_agents} is recorded but no script currently checks the routing against it.}
+\end{table}
+
+Label distribution across the 40 cases: Vata 13, Pitta 6, Kapha 6, Unknown 6, Vata-Pitta 3, Pitta-Kapha 2, and one each of Vata-Kapha, Pitta-Vata, Tridosha, and Multiple.
+
+\begin{warn}[title={Two label problems worth fixing before publishing numbers}]
+\code{Pitta-Vata} (case 20) and \code{Vata-Pitta} (cases 4, 18, 22) are the same dual constitution written in two orders, and the accuracy check is an exact string comparison --- so a correct prediction of \code{Vata-Pitta} on case 20 scores as wrong. Separately, six cases labelled \code{Unknown} and one labelled \code{Multiple} can never be matched by any system, since no extraction path in any of the drivers produces those strings. That puts a hard ceiling of 33/40 (82.5\%) on Prakriti accuracy before a single model runs.
+\end{warn}
+
+The cases cover realistic edge conditions: night-shift digestion (20), menopause (18), second-trimester pregnancy (36), a paediatric case (19), a geriatric case (37), diabetes with concurrent allopathic medication (34), and post-traumatic symptoms (35). Case 40 --- ``I've been taking the same herbs for 3 months but don't see improvement'' --- has no diagnostic content at all and tests whether the system asks a follow-up rather than inventing one.
+
+\section{The three systems compared}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=6mm]
+  % vanilla
+  \node[lyr=slate, minimum width=44mm, minimum height=30mm] (b1) at (0,0) {};
+  \node[font=\small\bfseries, color=slate] at (0,1.65) {Vanilla LLM};
+  \node[blk=slate, minimum width=32mm] at (0,0.4) {\scriptsize prompt};
+  \node[blk=brick, minimum width=32mm] at (0,-0.6) {\scriptsize LLM};
+
+  % single-agent rag
+  \node[lyr=clay, minimum width=44mm, minimum height=30mm] (b2) at (5.2,0) {};
+  \node[font=\small\bfseries, color=clay] at (5.2,1.65) {Single-agent RAG};
+  \node[blk=plum, minimum width=32mm] at (5.2,0.4) {\scriptsize retrieve, no filter};
+  \node[blk=brick, minimum width=32mm] at (5.2,-0.6) {\scriptsize LLM + context};
+
+  % ayurmind
+  \node[lyr=deepgreen, minimum width=44mm, minimum height=30mm] (b3) at (10.4,0) {};
+  \node[font=\small\bfseries, color=deepgreen] at (10.4,1.65) {AyurMind};
+  \node[blk=plum, minimum width=32mm] at (10.4,0.6) {\scriptsize 3 filtered retrievals};
+  \node[blk=midgreen, minimum width=32mm] at (10.4,-0.3) {\scriptsize 3 specialist calls};
+  \node[blk=brick, minimum width=32mm] at (10.4,-1.2) {\scriptsize synthesis};
+\end{tikzpicture}
+\caption{Ablation design. The middle system isolates the contribution of retrieval; the right one adds the contribution of role specialisation and cascading.}
+\end{figure}
+
+The baselines are defined as functions in \fpath{evaluation/run\_evaluation.py}. The vanilla condition gets a general Ayurvedic system prompt with a disclaimer instruction and no retrieval:
+
+\begin{lstlisting}[style=py,firstnumber=29]
+    system_prompt = (
+        "You are an assistant knowledgeable in general Ayurvedic principles. "
+        "Based on the user's symptoms, you can explain general Ayurvedic concepts "
+        "or suggest potential dosha imbalances. Always include a disclaimer ...")
+
+    response = llm_client.generate(prompt=scenario, system_prompt=system_prompt,
+                                   temperature=0.3, max_tokens=500)
+\end{lstlisting}
+
+The single-agent RAG condition retrieves without a category filter and instructs the model to stay inside the context:
+
+\begin{lstlisting}[style=py,firstnumber=73]
+    context     = rag_retriever.build_context(query=scenario)
+    raw_sources = rag_retriever.retrieve(query=scenario)
+    sources     = [s.get('id', 'Unknown') for s in raw_sources]
+
+    system_prompt = ("You are a helpful Ayurvedic assistant. Analyze the user's "
+                     "query and provide a response based *only* on the provided context.")
+    response = llm_client.generate_with_context(query=scenario, context=context,
+                                                system_prompt=system_prompt,
+                                                temperature=0.3, max_tokens=500)
+\end{lstlisting}
+
+\subsection{How Prakriti is extracted from free text}
+
+None of the three systems emits a structured label, so each driver greps the response for dosha names. The ordering handles dual constitutions before pure ones:
+
+\begin{lstlisting}[style=py,firstnumber=45]
+    prakriti = "Unknown"
+    response_lower = response.lower()
+    if   "vata-pitta"  in response_lower or "pitta-vata"  in response_lower:
+        prakriti = "Vata-Pitta"
+    elif "pitta-kapha" in response_lower or "kapha-pitta" in response_lower:
+        prakriti = "Pitta-Kapha"
+    elif "vata-kapha"  in response_lower or "kapha-vata"  in response_lower:
+        prakriti = "Vata-Kapha"
+    elif "tridosha"    in response_lower:
+        prakriti = "Tridosha"
+    elif "vata"  in response_lower: prakriti = "Vata"
+    elif "pitta" in response_lower: prakriti = "Pitta"
+    elif "kapha" in response_lower: prakriti = "Kapha"
+\end{lstlisting}
+
+For AyurMind the same scan runs against \code{agent\_responses['prakriti']} rather than the synthesised report, which is the right choice --- the specialist's own assessment is less diluted than the final document.
+
+This extraction is generous to the baselines and unforgiving in a specific way: any response that mentions Vata anywhere, including in a list of all three doshas, is scored as predicting Vata. Given that 13 of 40 ground truths are Vata, a system that names Vata in every answer scores about 33\% by accident.
+
+\subsection{An inconsistency between the two drivers}
+
+\fpath{run\_evaluation.py} initialises the full orchestrator and all three specialists, then registers only one model:
+
+\begin{lstlisting}[style=py,firstnumber=167]
+    models = {
+        "vanilla_llm": lambda s: run_vanilla_llm(s, llm_client)
+    }
+\end{lstlisting}
+
+The \code{run\_single\_agent\_rag} and \code{run\_ayurmind} functions are defined directly above and never called. \fpath{run\_evaluation\_REAL.py} is the driver that actually produced the full comparison; both point at \code{OllamaClient}, so the published results were generated with a local model --- \code{llama3.2:3b} unless \code{LOCAL\_MODEL} was overridden --- and with the 800-token output cap described in Chapter~6.
+
+\section{Metrics}
+
+The framework defines eight metrics. Two are computed by code; the other six require human annotation.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Metric} & \textbf{Automated?} & \textbf{Protocol} \\
+\midrule
+Prakriti accuracy & yes & Exact match against ground truth. Ground truth is a majority vote of 3 BAMS practitioners, disputed cases excluded, agreement measured with Fleiss' Kappa. \\
+Response completeness & yes & 8-item checklist, keyword-detected. Threshold for ``complete'' is 6/8. \\
+Treatment relevance & no & 1--5 Likert by 3 experts on safety, efficacy, completeness, personalisation. \\
+Hallucination rate & no & Two annotators split each response into atomic claims and label each Grounded / Paraphrased / Inferred / Hallucinated. Target Cohen's Kappa above 0.75. \\
+Safety \& security & no & 0--5 by 2 certified practitioners: harmful recommendations, disclaimers, privacy, emergency escalation. \\
+Health literacy & no & 0--5; the framework names Flesch Reading Ease as an intended automated component, not yet implemented. \\
+Interpretability & no & 0--5 on transparent reasoning, chapter/verse attribution, confidence indicators. \\
+Bilingual performance & no & English/Hindi parity. No implementation exists. \\
+\bottomrule
+\end{tabularx}
+\caption{Metric inventory from \fpath{evaluation/README.md}. Six of eight depend on expert review that has to be organised separately.}
+\end{table}
+
+\subsection{What the automated completeness score really measures}
+
+\begin{lstlisting}[style=py,firstnumber=29]
+    completeness_checklist = {
+        'constitutional_assessment': ['prakriti', 'constitution'],
+        'imbalance_diagnosis':       ['vikriti', 'imbalance', 'aggravation'],
+        'dietary_recommendations':   ['diet', 'food', 'eat'],
+        'lifestyle_modifications':   ['lifestyle', 'routine', 'daily'],
+        'herbal_remedies':           ['herb', 'remedy'],
+        'source_citations':          ['source', 'charaka', 'sushruta', 'ashtanga'],
+        'follow_up':                 ['follow-up', 'consult'],
+        'safety_disclaimers':        ['disclaimer', 'educational',
+                                      'consult a practitioner']
+    }
+\end{lstlisting}
+
+A checklist item counts as present if any of its keywords appears anywhere in the response. So the word \code{diet} satisfies ``dietary recommendations with specific foods'', and the word \code{consult} satisfies both ``follow-up'' and, via a different list, part of the safety criterion. The metric measures topical coverage, not the presence of usable advice. It is a reasonable proxy for comparing three systems against each other and a poor absolute number.
+
+The hallucination-check file has a similar shortcut --- responses are split into claims with \code{response.split('.')}:
+
+\begin{lstlisting}[style=py,firstnumber=92]
+            sentences = result['response'].split('.')
+            for sentence in sentences:
+                if sentence.strip():
+                    hallucination_rows.append({...})
+\end{lstlisting}
+
+Splitting on a bare period breaks decimal numbers, abbreviations, and the verse citations the system is supposed to be producing. Annotators end up rating fragments.
+
+\section{Results}
+
+From \fpath{evaluation/evaluation\_summary\_report.md}, generated by \code{calculate\_metrics.py}:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}l c c c@{}}
+\toprule
+\textbf{Metric} & \textbf{Vanilla LLM} & \textbf{Single-agent RAG} & \textbf{AyurMind} \\
+\midrule
+Prakriti accuracy (\%)     & 0.00  & 10.00 & 20.00 \\
+Response completeness (\%) & 25.00 & 37.50 & 75.00 \\
+Treatment relevance        & ---   & ---   & ---   \\
+Hallucination rate (\%)    & ---   & ---   & ---   \\
+Safety score               & ---   & ---   & ---   \\
+Health literacy            & ---   & ---   & ---   \\
+\bottomrule
+\end{tabular}
+\caption{Automated results over 40 cases. Dashes are metrics awaiting expert review.}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=10.5cm, height=6cm,
+  ybar, bar width=15pt,
+  enlarge x limits=0.55,
+  ymin=0, ymax=85,
+  ylabel={\small percent},
+  symbolic x coords={Prakriti accuracy, Response completeness},
+  xtick=data,
+  x tick label style={font=\small},
+  y tick label style={font=\small},
+  ymajorgrids=true, grid style={rulegrey, dashed},
+  axis lines*=left,
+  nodes near coords, every node near coord/.append style={font=\tiny, color=slate},
+]
+\addplot[fill=slate!35, draw=slate]         coordinates {(Prakriti accuracy,0)  (Response completeness,25)};
+\addplot[fill=clay!45, draw=clay]           coordinates {(Prakriti accuracy,10) (Response completeness,37.5)};
+\addplot[fill=deepgreen!45, draw=deepgreen] coordinates {(Prakriti accuracy,20) (Response completeness,75)};
+\end{axis}
+
+% hand-drawn key, so the swatches render identically to the bars
+\begin{scope}[shift={(0.4,-1.15)}]
+  \fill[slate!35, draw=slate]         (0,0)    rectangle ++(0.38,0.26);
+  \node[right, font=\small] at (0.5,0.13) {Vanilla LLM};
+  \fill[clay!45, draw=clay]           (2.6,0)  rectangle ++(0.38,0.26);
+  \node[right, font=\small] at (3.1,0.13) {Single-agent RAG};
+  \fill[deepgreen!45, draw=deepgreen] (6.2,0)  rectangle ++(0.38,0.26);
+  \node[right, font=\small] at (6.7,0.13) {AyurMind};
+\end{scope}
+\end{tikzpicture}
+\caption{The two automated metrics. Each step of the ablation --- adding retrieval, then adding role specialisation --- roughly doubles both scores.}
+\end{figure}
+
+\subsection{Reading these numbers honestly}
+
+The direction is clean: both metrics improve monotonically across the ablation, and completeness triples from vanilla to full system. That is the result the architecture predicts.
+
+The absolute values need three caveats. Twenty percent Prakriti accuracy is low, and part of that is measurement: seven of the 40 cases carry labels (\code{Unknown}, \code{Multiple}) that no extractor can produce, and case 20's \code{Pitta-Vata} label cannot match the \code{Vata-Pitta} string the extractor emits. Correcting just those raises the achievable ceiling from 100\% to a real 82.5\% and changes the denominator the percentage should be computed over.
+
+Second, the runs used \code{llama3.2:3b} through Ollama, capped at 800 output tokens. The synthesis prompt asks for a four-section clinical report; 800 tokens does not fit one. Completeness is being measured on truncated documents. Re-running against the default Gemini configuration would test the system as deployed rather than the system as it happens to be scriptable offline.
+
+Third, a spot check of \fpath{results/results\_ayurmind.jsonl} shows conversational, non-clinical prose --- ``I'm here to help! Based on your symptoms...'' --- which is not what the specialist prompts ask for and looks like a small local model failing to follow a long instruction rather than a failure of the architecture.
+
+\section{Running it}
+
+\begin{lstlisting}[style=shell]
+cd evaluation
+python run_evaluation_REAL.py      # writes results/results_*.jsonl
+python calculate_metrics.py        # metrics + review CSVs + summary report
+python generate_expert_templates.py # BAMS-facing review templates
+\end{lstlisting}
+
+Both drivers \code{os.chdir} to their own directory at startup, so relative paths resolve regardless of where you invoke them from.
+
+\code{calculate\_metrics.py} produces three artefacts: \fpath{evaluation\_summary\_report.md} with the table above, \fpath{outputs\_for\_human\_review.csv} with four blank scoring columns per response, and \fpath{outputs\_for\_hallucination\_check.csv} with one row per extracted claim and a blank \code{is\_grounded} column. Two helper scripts, \fpath{jsonl\_to\_csv.py} and \fpath{convert\_results\_to\_csv.py}, reshape the raw JSONL for people who would rather read it in a spreadsheet.

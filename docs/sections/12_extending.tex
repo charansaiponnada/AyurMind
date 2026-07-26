@@ -1,0 +1,228 @@
+\chapter{Extending the System}
+\label{ch:extend}
+
+The base-agent design makes some changes cheap and others expensive. This chapter walks through the common ones with working code.
+
+\section{Adding a fourth specialist}
+
+Say you want a Dinacharya agent that handles daily-routine and seasonal-regimen questions. Four edits.
+
+\subsection{1. Tag the corpus}
+
+Add a category in \code{AyurvedicTextProcessor.categorize\_content}. Position matters --- put it \emph{before} the \code{prakriti} test, or the dosha names in most routine passages will swallow it:
+
+\begin{lstlisting}[style=py]
+        # Daily and seasonal regimen - test before the dosha keywords
+        if any(term in text_lower for term in
+               ['dinacharya', 'ritucharya', 'daily routine', 'seasonal regimen',
+                'sadvritta']):
+            return 'regimen'
+
+        # Prakriti-related content
+        if any(term in text_lower for term in
+               ['vata', 'pitta', 'kapha', 'constitution', 'prakriti']):
+            return 'prakriti'
+\end{lstlisting}
+
+Re-run steps 1 and 2 after deleting \code{data/vectordb/}, since categories are baked into the index.
+
+\subsection{2. Write the agent}
+
+\begin{lstlisting}[style=py]
+"""Regimen Agent - daily and seasonal routine"""
+from .base_agent import BaseAgent
+from typing import Optional
+
+class RegimenAgent(BaseAgent):
+    def __init__(self, rag_retriever, llm_client):
+        super().__init__(name="Regimen Advisor", rag_retriever=rag_retriever,
+                         llm_client=llm_client, temperature=0.3)
+
+    def get_system_prompt(self) -> str:
+        return """You are a senior Ayurvedic physician advising on Dinacharya
+(daily regimen) and Ritucharya (seasonal regimen) for BAMS practitioners.
+
+**CRITICAL INSTRUCTIONS**:
+1. Ground every recommendation in the classical schedule, citing the Sutra
+   Sthana chapter where the practice is described.
+2. Give timings in both muhurta terms and clock time.
+3. Use Sanskrit terms with brief English glosses.
+
+**RESPONSE STRUCTURE**:
+1. **Dinacharya Protocol**: ordered daily practices with timing
+2. **Ritucharya Adjustment**: modifications for the current Ritu
+3. **Contraindications**: practices to omit given the stated Vikriti
+4. **Clinical Notes**: brief summary for a fellow practitioner"""
+
+    def get_category_filter(self) -> Optional[str]:
+        return "regimen"
+\end{lstlisting}
+
+\subsection{3. Teach the orchestrator about it}
+
+Three touch points in \fpath{src/agents/orchestrator.py} --- the constructor, the router, and the cascade:
+
+\begin{lstlisting}[style=py]
+    def __init__(self, prakriti_agent, dosha_agent, treatment_agent,
+                 regimen_agent, llm_client):
+        ...
+        self.regimen_agent = regimen_agent
+
+    def analyze_query(self, query: str) -> Dict:
+        ...
+        needs_regimen = any(term in query_lower for term in
+            ['routine', 'schedule', 'dinacharya', 'ritucharya', 'season',
+             'wake', 'sleep time'])
+        return {'prakriti': needs_prakriti, 'dosha': needs_dosha,
+                'treatment': needs_treatment, 'regimen': needs_regimen}
+
+    # in process_query, after the treatment block:
+        if agent_activation['regimen']:
+            regimen_info = base_additional_info.copy()
+            if 'prakriti' in results:
+                regimen_info['Prakriti'] = results['prakriti']
+            if 'dosha' in results:
+                regimen_info['Dosha Imbalance'] = results['dosha']
+            regimen_result = self.regimen_agent.process(
+                query, regimen_info, conversation_history)
+            results['regimen'] = regimen_result['response']
+            retrieved_sources.extend(regimen_result.get('sources', []))
+\end{lstlisting}
+
+Also add a branch in \code{synthesize\_response} so the new report reaches the final document:
+
+\begin{lstlisting}[style=py]
+        if 'regimen' in agent_results:
+            synthesis_context += f"REGIMEN GUIDANCE:\n{agent_results['regimen']}\n\n"
+\end{lstlisting}
+
+\subsection{4. Wire it up}
+
+In \fpath{src/ui/gradio\_app.py}:
+
+\begin{lstlisting}[style=py]
+        self.regimen_agent = RegimenAgent(self.retriever, self.llm_client)
+        self.orchestrator  = OrchestratorAgent(
+            self.prakriti_agent, self.dosha_agent, self.treatment_agent,
+            self.regimen_agent, self.llm_client)
+\end{lstlisting}
+
+\begin{note}[title={The orchestrator is the friction point}]
+Adding an agent costs one new file and four edits to one existing file. The activation dictionary, the cascade, and the synthesis context are all hand-written per agent. A registry --- a list of \code{(agent, trigger\_words, upstream\_keys)} tuples iterated in order --- would reduce this to one file, and is the refactor to reach for once a fifth agent appears.
+\end{note}
+
+\section{Adding a new LLM provider}
+
+Implement two methods and the rest of the system does not care.
+
+\begin{lstlisting}[style=py]
+"""Anthropic client"""
+import os
+from typing import Optional, List, Dict
+from anthropic import Anthropic
+
+class AnthropicClient:
+    def __init__(self, api_key: str = None, model: str = None):
+        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not self.api_key:
+            raise ValueError("Anthropic API key not found. "
+                             "Set ANTHROPIC_API_KEY in your .env file.")
+        self.client     = Anthropic(api_key=self.api_key)
+        self.model_name = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+
+    def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                 temperature: float = 0.5, max_tokens: int = 4000,
+                 conversation_history: Optional[List[Dict]] = None, **kwargs) -> str:
+        messages = []
+        if conversation_history:
+            # Drop the trailing turn: the UI already appended the current message
+            for turn in conversation_history[:-1]:
+                messages.append({"role": turn["role"], "content": turn["content"]})
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            response = self.client.messages.create(
+                model=self.model_name, system=system_prompt or "",
+                messages=messages, temperature=temperature, max_tokens=max_tokens)
+            return response.content[0].text
+        except Exception as e:
+            raise RuntimeError(f"Anthropic API Error: {e}")
+
+    def generate_with_context(self, query: str, context: str, system_prompt: str,
+                              temperature: float = 0.3, max_tokens: int = 4000,
+                              conversation_history: Optional[List[Dict]] = None) -> str:
+        prompt = f"""Context from Ayurvedic texts:
+
+{context}
+
+---
+
+User Query: {query}
+
+Based on the context provided above, please provide a response."""
+        return self.generate(prompt=prompt, system_prompt=system_prompt,
+                             temperature=temperature, max_tokens=max_tokens,
+                             conversation_history=conversation_history)
+\end{lstlisting}
+
+Two details that matter. Expose \code{model\_name} --- \code{AyurMindApp} logs it on startup, and \code{OllamaClient} aliases \code{self.model\_name = self.model} for exactly this reason. And slice \code{conversation\_history[:-1]}, matching OpenRouter and Ollama rather than the Google and OpenAI clients (defect 3 in Chapter~\ref{ch:gaps}).
+
+Then insert it into the fallback chain in \fpath{gradio\_app.py} at whatever priority you want.
+
+\section{Adding a second source text}
+
+The scraper is written against one MediaWiki instance, so a second text needs a second scraper class rather than a config entry. The processor and everything downstream are source-agnostic --- they only require the four metadata keys.
+
+\begin{enumerate}[leftmargin=*]
+  \item Write \code{SushrutaScraper} with the same \code{scrape\_all()} contract, writing into \code{data/raw/sushruta/} and producing a compatible \code{scraping\_summary.json}.
+  \item Add a \code{text} key to chunk metadata (\code{"charaka"} / \code{"sushruta"}) so retrieval can be scoped per source, and extend \code{AyurvedicVectorStore.search} with a \code{text\_filter}.
+  \item Re-run steps 1 and 2. The Chroma collection holds both corpora; the category filters keep working unchanged.
+\end{enumerate}
+
+The retrieval quality question is worth a thought before doing this. Chroma returns the nearest five vectors across the whole collection, so adding a second text does not give you five chunks from each --- it gives you five chunks total, and the two corpora compete. If per-source coverage matters, retrieve five per source with two filtered calls and concatenate.
+
+\section{Making the source filter work}
+
+The two-line fix for defect 2. In \code{AyurvedicTextProcessor.process\_all}, store the Sthana name alongside the display name:
+
+\begin{lstlisting}[style=py]
+                    chapter_metadata = {
+                        'section':      section['section_name'],
+                        'sthana':       section['section_key'].replace('_', ' '),
+                        'section_code': section['section_code'],
+                        'chapter':      chapter_info['title'],
+                        ...
+                    }
+\end{lstlisting}
+
+Then match against it in \code{AyurvedicVectorStore.search}:
+
+\begin{lstlisting}[style=py]
+        if source_filter:
+            where_conditions.append({"$or": [{"sthana":  source_filter},
+                                             {"section": source_filter},
+                                             {"chapter": source_filter}]})
+\end{lstlisting}
+
+With \code{sthana} holding \code{"Siddhi Sthana"}, the phrase the orchestrator's regex extracts now matches exactly, and the treatment agent's per-Sthana prompt branches finally get the context they were written for.
+
+\section{Things that are harder than they look}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Change} & \textbf{Why it is not small} \\
+\midrule
+Streaming responses & The cascade is inherently sequential and synthesis needs all specialist outputs before it starts. You can stream the final synthesis, but the first three-quarters of the wait produces nothing to show. Streaming per-agent progress into the chat is the realistic version. \\
+\addlinespace
+Hindi support & Needs a multilingual embedding model (so a rebuild of the whole index), translated system prompts, and a decision about whether retrieval happens in English with translated output or end-to-end in Hindi. The evaluation framework already defines the metric for it. \\
+\addlinespace
+Parallel agent execution & Dosha consumes Prakriti's output and Treatment consumes both, so only the Prakriti/Dosha pair is independent, and only when Treatment is inactive. The saving is one call on a subset of queries. \\
+\addlinespace
+Replacing keyword routing with a classifier & Straightforward to write --- one cheap model call returning a JSON activation dictionary --- but it adds a call to the fast path, which exists precisely to avoid extra calls. Worth measuring the misroute rate against the 40-case dataset's \code{expected\_agents} column first; that column exists for this purpose and nothing reads it yet. \\
+\bottomrule
+\end{tabularx}
+\caption{Changes that touch the architecture rather than sitting on top of it.}
+\end{table}

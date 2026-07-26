@@ -1,0 +1,170 @@
+\appendix
+
+\chapter{Reference}
+
+\section{Public API by module}
+
+\begin{longtable}{@{}p{3.8cm} p{5.5cm} p{5.9cm}@{}}
+\caption{Every public method in \fpath{src/}.}\\
+\toprule
+\textbf{Class} & \textbf{Method} & \textbf{Returns} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Class} & \textbf{Method} & \textbf{Returns} \\
+\midrule
+\endhead
+\multicolumn{3}{@{}l}{\textit{\fpath{src/scraper/}}}\\
+\code{CharakaScraper} & \code{fetch\_page(url)} & \code{(html, ok)} tuple \\
+ & \code{extract\_chapter\_links(html, base)} & list of \code{\{title, url\}} \\
+ & \code{extract\_text\_content(html)} & cleaned text \\
+ & \code{scrape\_section(key)} & section metadata dict \\
+ & \code{scrape\_all()} & summary across 8 sections \\
+\addlinespace
+\code{AyurvedicTextProcessor} & \code{count\_tokens(text)} & int, \code{cl100k\_base} \\
+ & \code{clean\_text(text)} & normalised text \\
+ & \code{chunk\_text\_semantic(text, meta)} & list of chunk dicts \\
+ & \code{categorize\_content(text, section)} & one of prakriti / vikriti / treatment / general \\
+ & \code{process\_all()} & processing summary \\
+\addlinespace
+\multicolumn{3}{@{}l}{\textit{\fpath{src/rag/}}}\\
+\code{EmbeddingGenerator} & \code{embed\_text(text)} & \code{np.ndarray}, 768-dim \\
+ & \code{embed\_batch(texts, batch\_size)} & \code{np.ndarray} matrix \\
+ & \code{get\_embedding\_dimension()} & int \\
+\addlinespace
+\code{AyurvedicVectorStore} & \code{add\_chunks(chunks, embeddings)} & none \\
+ & \code{search(emb, n, cat, source)} & raw Chroma response \\
+ & \code{get\_stats()} & \code{\{total\_chunks, categories\}} \\
+\addlinespace
+\code{RAGRetriever} & \code{retrieve(query, n, cat, source)} & list of \code{\{id, text, metadata, distance\}} \\
+ & \code{build\_context(query, ...)} & formatted context string \\
+\addlinespace
+\multicolumn{3}{@{}l}{\textit{\fpath{src/llm/} --- all four clients}}\\
+\code{*Client} & \code{generate(prompt, ...)} & response text \\
+ & \code{generate\_with\_context(query, context, ...)} & response text \\
+\code{OllamaClient} & \code{is\_available()} & bool, 2-second probe \\
+\addlinespace
+\multicolumn{3}{@{}l}{\textit{\fpath{src/agents/}}}\\
+\code{BaseAgent} & \code{process(query, info, history)} & \code{\{agent, response, sources, query\}} \\
+ & \code{retrieve\_context\_and\_sources(...)} & \code{(context\_str, chunks)} \\
+ & \code{generate\_response(...)} & response text \\
+ & \code{get\_system\_prompt()} & abstract \\
+ & \code{get\_category\_filter()} & abstract \\
+\addlinespace
+\code{OrchestratorAgent} & \code{simple\_query(query, history)} & full result dict --- the main entry point \\
+ & \code{analyze\_query(query)} & \code{\{prakriti, dosha, treatment\}} booleans \\
+ & \code{process\_query(query, activation, history)} & slow-path result dict \\
+ & \code{synthesize\_response(...)} & final report text \\
+ & \code{\_extract\_requested\_sources(query)} & Sthana name or \code{None} \\
+\addlinespace
+\multicolumn{3}{@{}l}{\textit{\fpath{src/ui/}}}\\
+\code{AyurMindApp} & \code{chat(message, history)} & updated history list \\
+ & \code{create\_interface()} & \code{gr.Blocks} \\
+ & \code{launch(share, server\_port)} & blocks and serves \\
+\bottomrule
+\end{longtable}
+
+\section{The result dictionary}
+
+\code{OrchestratorAgent.simple\_query()} returns different shapes depending on the path taken.
+
+\begin{lstlisting}[style=json]
+// SLOW PATH
+{
+  "query": "I have acid reflux and a short temper. What should I do?",
+  "agent_responses": {
+    "prakriti":  "**Provisional Constitutional Assessment**: Pitta-dominant ...",
+    "treatment": "**Treatment Principle (Chikitsa Sutra)**: Pitta Shamana ..."
+  },
+  "final_response":    "1. PROVISIONAL DIAGNOSIS (NIDANA & VIKRITI VIJNANA) ...",
+  "retrieved_sources": [
+    {"id": "chunk_1842",
+     "text": "...",
+     "metadata": {"section": "Section on Therapeutic Principles",
+                  "chapter": "Amlapitta Chikitsa",
+                  "category": "treatment"},
+     "distance": 0.31}
+  ],
+  "agent_activation": {"prakriti": true, "dosha": false, "treatment": true}
+}
+
+// FAST PATH - note: no agent_responses key
+{
+  "query": "What is Ayurveda?",
+  "final_response":    "Ayurveda is a system of medicine ...",
+  "retrieved_sources": [],
+  "agent_activation": {"prakriti": false, "dosha": false, "treatment": false}
+}
+\end{lstlisting}
+
+Callers that read \code{agent\_responses} must use \code{.get()} --- the evaluation driver does, the UI never touches it.
+
+\section{Hand-written test questions}
+
+\fpath{prompts.txt} holds 20 questions grouped by which part of the system they exercise. They are more useful than the Gradio examples because they were written to hit specific routes.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{4.3cm} X@{}}
+\toprule
+\textbf{Category} & \textbf{Sample question} \\
+\midrule
+Fundamentals (Sutra Sthana) & ``Describe the six tastes (rasas) and their effects on the doshas.'' \\
+Diagnostics (Nidana Sthana) & ``What are the primary causes and premonitory signs of Jvara (fever)?'' \\
+Constitution (Vimana, Sharira) & ``I have a tendency to gain weight, my skin is oily, and I have a calm, steady personality. What might my dominant dosha be?'' \\
+Therapy (Chikitsa, Kalpa, Siddhi) & ``Describe the procedure and benefits of Basti as detailed in the Siddhi Sthana.'' \\
+Full pipeline & Three multi-part scenarios (Vata, Pitta, Kapha) that state age, occupation, constitution hints and symptoms, then ask for both diagnosis and a treatment plan. \\
+\bottomrule
+\end{tabularx}
+\caption{Test question categories from \fpath{prompts.txt}. The Basti question is the one that exercises source filtering --- and currently demonstrates defect 2.}
+\end{table}
+
+\section{Commit history worth knowing}
+
+The 20 most recent commits show the design settling. Five are relevant to reading the code:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Commit} & \textbf{What changed} \\
+\midrule
+\code{6f42919} & Smart query routing in the orchestrator --- the fast/slow split, replacing unconditional activation of all three agents. \\
+\code{ccd3c6f} & Conversational memory added to the chatbot; this is what introduced \code{conversation\_history} throughout. \\
+\code{9c27c94} & Prompts rewritten for clinical and textual accuracy --- the shift to the BAMS-practitioner register. \\
+\code{91e5167} & OpenRouter replaced with the Google Gemini client as the default provider. \\
+\code{3ba4a9e} & Gemini switched to the stateless \code{generate\_content} method. \\
+\bottomrule
+\end{tabularx}
+\caption{Commits that explain why the code looks the way it does.}
+\end{table}
+
+\section{Glossary}
+
+\begin{longtable}{@{}p{4.2cm} p{11.3cm}@{}}
+\caption{Sanskrit terms as they are used in the code and prompts.}\\
+\toprule
+\textbf{Term} & \textbf{Meaning in this codebase} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Term} & \textbf{Meaning in this codebase} \\
+\midrule
+\endhead
+Prakriti & Constitutional baseline, fixed at conception. The \code{PrakritiAgent} category and one of seven classification labels in the dataset. \\
+Vikriti & Current imbalance, the deviation from Prakriti. The \code{DoshaAgent}'s category filter is named after it. \\
+Dosha & Vata, Pitta, Kapha. Also the six most common words in the corpus, which is why category assignment skews. \\
+Guna & Quality (Ruksha = dry, Tikshna = sharp). Prompts require trait-to-Guna mapping. \\
+Samprapti & Pathogenesis. The dosha agent must describe it, not just name a dosha. \\
+Dhatu / Srotas & Bodily tissue / channel. Required detail in the diagnostic output. \\
+Agni & Digestive fire. Mandagni = slow, Tikshnagni = sharp. \\
+Chikitsa Sutra & Core treatment principle; the first heading of the treatment agent's output. \\
+Shodhana / Shamana & Purification therapy / palliative therapy. Shodhana carries the mandatory supervision warning. \\
+Pathya / Apathya & Advised / to-be-avoided diet and conduct. Section 3 of the synthesised report. \\
+Panchakarma & The five purification procedures, including Vamana, Virechana and Basti. \\
+Sthana & A book of the Samhita. Eight of them; the unit the source filter tries to select. \\
+BAMS & Bachelor of Ayurvedic Medicine and Surgery --- the audience every system prompt names. \\
+\bottomrule
+\end{longtable}

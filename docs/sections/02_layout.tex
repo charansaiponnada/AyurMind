@@ -1,0 +1,97 @@
+\chapter{Repository Layout}
+
+Seventy files are tracked in git. Roughly a third of them are source, a third are evaluation artefacts, and a third are documentation and diagrams. The tree below marks what each directory is responsible for.
+
+\begin{lstlisting}[style=plain]
+AyurMind/
+|
+|-- app.py                      entry point for Hugging Face Spaces
+|-- Dockerfile                  python:3.10-slim image, CMD -> scripts/04_run_app.py
+|-- docker-compose.yml          single service, port 7860, ./data mounted
+|-- requirements.txt            pinned deps (some unused - see chapter 11)
+|-- requirements_simplified.txt smaller variant, no langchain/jupyter
+|
+|-- scripts/                    the four-step pipeline, run in order
+|   |-- 01_scrape_data.py       scrape + chunk           (15-30 min)
+|   |-- 02_build_vectordb.py    embed + index            (5-10 min)
+|   |-- 03_test_rag.py          three smoke queries      (1 min)
+|   `-- 04_run_app.py           launch Gradio            (instant)
+|
+|-- src/
+|   |-- scraper/
+|   |   |-- charaka_scraper.py  CharakaScraper: fetch 8 sections -> data/raw/
+|   |   `-- data_processor.py   AyurvedicTextProcessor: clean, chunk, tag
+|   |-- rag/
+|   |   |-- embeddings.py       EmbeddingGenerator: sentence-transformers
+|   |   |-- vectorstore.py      AyurvedicVectorStore: ChromaDB wrapper
+|   |   `-- retriever.py        RAGRetriever: embed query -> search -> chunks
+|   |-- llm/
+|   |   |-- google_client.py    GoogleClient    (default)
+|   |   |-- openai_client.py    OpenAIClient    (USE_OPENAI=true)
+|   |   |-- local_client.py     OllamaClient    (USE_LOCAL_LLM=true)
+|   |   `-- openrouter_client.py OpenRouterClient (present, never imported)
+|   |-- agents/
+|   |   |-- base_agent.py       BaseAgent: retrieve -> prompt -> generate
+|   |   |-- prakriti_agent.py   constitution, category filter "prakriti"
+|   |   |-- dosha_agent.py      imbalance,    category filter "vikriti"
+|   |   |-- treatment_agent.py  therapy,      category filter "treatment"
+|   |   `-- orchestrator.py     routing, cascade, synthesis
+|   `-- ui/
+|       `-- gradio_app.py       AyurMindApp: wiring + chat handler
+|
+|-- evaluation/
+|   |-- dataset/evaluation_cases.csv   40 labelled scenarios
+|   |-- results/*.jsonl                raw model outputs, 40 lines each
+|   |-- run_evaluation.py              driver (currently vanilla only)
+|   |-- run_evaluation_REAL.py         driver for the full multi-agent run
+|   |-- calculate_metrics.py           automated metrics + review templates
+|   |-- generate_expert_templates.py   BAMS-facing CSV templates
+|   `-- evaluation_summary_report.md   generated results table
+|
+|-- images/                     rendered PNGs of the two mermaid diagrams
+|-- *.mermaid, *.mmd            architecture and dataflow diagram sources
+|-- diagrams.html               standalone mermaid viewer
+|-- prompts.txt                 20 hand-written test questions by category
+`-- research_proposal.js        70 KB docx generator for the conference paper
+\end{lstlisting}
+
+\section{Directories the code creates but git ignores}
+
+\fpath{.gitignore} excludes \code{data/} entirely, so nothing under it is in the repository. Three directories appear at runtime:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Path} & \textbf{Created by} & \textbf{Contents} \\
+\midrule
+\code{data/raw/} & \code{CharakaScraper} & One folder per section: \code{index.html}, \code{chapter\_NN.html}, matching \code{.txt} files, \code{metadata.json}. Plus \code{scraping\_summary.json} at the top. \\
+\code{data/processed/} & \code{AyurvedicTextProcessor} & \code{all\_chunks.json} (every chunk with text and metadata) and \code{processing\_summary.json}. \\
+\code{data/vectordb/} & \code{AyurvedicVectorStore} & ChromaDB's SQLite file and index segments. Around 100~MB once populated. \\
+\bottomrule
+\end{tabularx}
+\caption{Runtime data directories. A fresh clone has none of these; step 1 and step 2 of the pipeline build them.}
+\end{table}
+
+\begin{note}[title={The vector database is the deployment artefact}]
+Everything before \fpath{scripts/02\_build\_vectordb.py} is a one-off. Once \code{data/vectordb/} exists you can throw away \code{data/raw/} and \code{data/processed/} --- the application only ever reads the Chroma collection. This matters for Docker and Hugging Face Spaces, where you want to ship the built database rather than scrape on every cold start.
+\end{note}
+
+\section{Files the README promises that do not exist}
+
+\fpath{README.md} prints a project tree that includes a \code{tests/} package with three test modules, a \code{config/} directory holding \code{config.yaml} and \code{prompts.yaml}, a \code{notebooks/} folder, plus \code{.env.example}, \code{LICENSE}, and \code{CONTRIBUTING.md}. None of these are tracked in git. Prompts live inline as Python strings inside each agent class; configuration is read from environment variables through \code{os.getenv} at the point of use; there is no test suite, so the \code{pytest tests/} instruction in the README fails immediately.
+
+\section{Reading order for a newcomer}
+
+If you are opening this repository for the first time, the shortest path to understanding it is bottom-up, following the direction data actually moves:
+
+\begin{enumerate}[leftmargin=*]
+  \item \fpath{src/scraper/data\_processor.py} --- see what a chunk looks like and what metadata it carries. Everything downstream depends on those four metadata keys.
+  \item \fpath{src/rag/vectorstore.py} --- 53 lines, and it shows exactly how the metadata is turned into a Chroma \code{where} filter.
+  \item \fpath{src/agents/base\_agent.py} --- 63 lines that define the entire agent contract.
+  \item \fpath{src/agents/orchestrator.py} --- the only file with real control flow.
+  \item \fpath{src/ui/gradio\_app.py} --- the wiring that connects the four above.
+\end{enumerate}
+
+The four LLM clients can be skimmed; they are near-identical adapters around different HTTP APIs.

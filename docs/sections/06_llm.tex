@@ -1,0 +1,225 @@
+\chapter{The Language Model Layer}
+
+Four client classes live in \fpath{src/llm/}. They target different APIs but expose the same two methods, so any of them can be dropped into an agent without the agent knowing which one it got.
+
+\section{The informal interface}
+
+There is no abstract base class here --- the contract is duck-typed. Every client implements:
+
+\begin{lstlisting}[style=py]
+def generate(self, prompt: str,
+             system_prompt: Optional[str] = None,
+             temperature: float = ...,
+             max_tokens: int = ...,
+             conversation_history: Optional[List[Dict]] = None,
+             **kwargs) -> str
+
+def generate_with_context(self, query: str, context: str,
+                          system_prompt: str,
+                          temperature: float = ...,
+                          max_tokens: int = ...,
+                          conversation_history: Optional[List[Dict]] = None) -> str
+\end{lstlisting}
+
+\code{generate\_with\_context} is the RAG entry point and is the same in all four files --- it wraps the retrieved passages and the question in a fixed template, then delegates to \code{generate}:
+
+\begin{lstlisting}[style=py]
+        prompt = f"""Context from Ayurvedic texts:
+
+{context}
+
+---
+
+User Query: {query}
+
+Based on the context provided above, please provide a response."""
+\end{lstlisting}
+
+Specialist agents call \code{generate\_with\_context}. The orchestrator calls \code{generate} directly, both for the fast path and for synthesis, because by then the context has already been consumed and what it is passing along is the specialists' prose.
+
+\section{The four clients side by side}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l l X@{}}
+\toprule
+\textbf{Client} & \textbf{Default model} & \textbf{Selected by} & \textbf{Notes} \\
+\midrule
+\code{GoogleClient} & \code{gemini-1.5-flash} & fallback, always last & The de facto default. \code{google-generativeai} SDK, stateless \code{generate\_content}. \\
+\addlinespace
+\code{OpenAIClient} & \code{gpt-4o-mini} & \code{USE\_OPENAI=true} & \code{openai} SDK. Thinnest of the four at 74 lines. \\
+\addlinespace
+\code{OllamaClient} & \code{llama3.2:3b} & \code{USE\_LOCAL\_LLM=true} & Raw HTTP to \code{localhost:11434}. Free and offline; ignores \code{max\_tokens}. \\
+\addlinespace
+\code{OpenRouterClient} & \code{mistral-7b-instruct:free} & \textbf{never} & Raw HTTP. Not imported anywhere in the application. \\
+\bottomrule
+\end{tabularx}
+\caption{Client comparison. Only the first three are reachable from the running application.}
+\end{table}
+
+\section{Provider selection}
+
+\code{AyurMindApp.\_\_init\_\_} walks a fixed preference order, catching failures at each step:
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=7mm]
+  \node[dia=clay, text width=22mm] (d1) {USE\_LOCAL\_LLM};
+  \node[blk=midgreen, right=20mm of d1, minimum width=30mm] (ol) {OllamaClient};
+  \node[dia=clay, below=13mm of d1, text width=22mm] (d2) {USE\_OPENAI};
+  \node[blk=midgreen, right=20mm of d2, minimum width=30mm] (oa) {OpenAIClient};
+  \node[blk=deepgreen, below=13mm of d2, minimum width=30mm] (gg) {GoogleClient};
+  \node[blk=brick, below=9mm of gg, minimum width=30mm] (er) {raise};
+
+  \draw[arb=midgreen] (d1) -- node[lbl,above]{true} (ol);
+  \draw[arb=clay] (d1) -- node[lbl,right]{false} (d2);
+  \draw[arb=midgreen] (d2) -- node[lbl,above]{true} (oa);
+  \draw[arb=clay] (d2) -- node[lbl,right]{false} (gg);
+  \draw[arb=brick] (gg) -- node[lbl,right]{no key} (er);
+
+  \draw[ar, dashed] (ol.south) to[out=-90,in=0] node[lbl,right,yshift=1mm]{init failed} (d2.east);
+  \draw[ar, dashed] (oa.south) to[out=-90,in=0] node[lbl,right,yshift=1mm]{init failed} (gg.east);
+\end{tikzpicture}
+\caption{Fallback chain. A client that raises during construction is logged as a warning and the next option is tried; only a Google failure is fatal.}
+\end{figure}
+
+\begin{lstlisting}[style=py,firstnumber=48]
+        self.llm_client = None
+        use_local_llm = os.getenv("USE_LOCAL_LLM", "false").lower() == "true"
+        use_openai    = os.getenv("USE_OPENAI",    "false").lower() == "true"
+
+        if use_local_llm:
+            try:
+                self.llm_client = OllamaClient()
+                app_logger.info(f"Using Local client: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.warning(f"Local LLM Client failed: {e}. Falling back.")
+
+        if self.llm_client is None and use_openai:
+            try:
+                self.llm_client = OpenAIClient()
+                app_logger.info(f"Using OpenAI client: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.warning(f"OpenAI Client failed: {e}. Falling back to Google.")
+
+        if self.llm_client is None:
+            try:
+                self.llm_client = GoogleClient()
+                app_logger.info(f"Using Google client: {self.llm_client.model_name}")
+            except Exception as e:
+                app_logger.error(f"Failed to initialize GoogleClient: {e}.")
+                raise e     # Critical failure if no client can be initialized
+\end{lstlisting}
+
+The fallback covers construction only. Once a client is chosen, a mid-session API error propagates up to the Gradio handler and is shown as an error message in the chat; there is no runtime failover to a second provider.
+
+Note also that \code{OllamaClient.\_\_init\_\_} does not raise when Ollama is unreachable --- it logs a warning and returns a usable object. So \code{USE\_LOCAL\_LLM=true} with Ollama stopped selects the Ollama client successfully and then fails on the first generation call, rather than falling through to OpenAI or Google.
+
+\section{Conversation history handling}
+
+All four clients accept a \code{conversation\_history} list of \code{\{"role", "content"\}} dictionaries, and this is where their behaviour genuinely diverges.
+
+\subsection{Google}
+
+Gemini names the assistant role \code{model}, so history is remapped. The client also has to cope with Gradio's message format, where \code{content} can be a list of part-dictionaries rather than a plain string:
+
+\begin{lstlisting}[style=py,firstnumber=62]
+    def _format_history(self, conversation_history):
+        if not conversation_history:
+            return []
+        formatted_history = []
+        for turn in conversation_history:
+            # Gemini uses 'model' for the assistant's role, 'user' for user
+            role = "model" if turn["role"] == "assistant" else "user"
+            text_content = self._extract_text_content(turn["content"])
+            formatted_history.append({"role": role, "parts": [text_content]})
+        return formatted_history
+\end{lstlisting}
+
+\code{\_extract\_text\_content} handles four shapes --- a plain string, a list of dicts with \code{text} keys, a single dict with a \code{text} key, and anything else via \code{str()}. That defensiveness exists because Gradio has changed its chat message schema more than once.
+
+\subsection{OpenRouter and Ollama drop the last turn}
+
+Both slice the history before using it:
+
+\begin{lstlisting}[style=py]
+        # OpenRouterClient.generate
+        if conversation_history:
+            # Add all but the last user message from history
+            for turn in conversation_history[:-1]:
+                messages.append(turn)
+\end{lstlisting}
+
+That slice is correct for how the UI calls them. \code{AyurMindApp.chat()} appends the user's new message to \code{history} \emph{before} passing it down, so the last element of \code{conversation\_history} is the same message that arrives separately as \code{prompt}.
+
+\begin{bug}[title={Google and OpenAI send the current message twice}]
+\code{GoogleClient.\_format\_history} iterates the whole list, then appends the prompt on top. \code{OpenAIClient} does the same. Since the UI has already appended the user's message to \code{history}, the model receives it once verbatim from history and again wrapped in the RAG or synthesis prompt. With the default Google client this happens on every slow-path turn --- once per specialist agent plus once for synthesis. Adding \code{[:-1]} in both clients, matching the OpenRouter and Ollama behaviour, resolves it.
+\end{bug}
+
+\subsection{Ollama flattens history into the prompt}
+
+The Ollama \code{/api/generate} endpoint takes one string, so the client builds the transcript by hand:
+
+\begin{lstlisting}[style=py,firstnumber=66]
+        full_prompt = ""
+        if system_prompt:
+            full_prompt += f"{system_prompt}\n\n"
+        if history_str:
+            full_prompt += f"Previous conversation:\n{history_str}\n"
+        full_prompt += f"Current query: {prompt}"
+
+        payload = {
+            "model": self.model,
+            "prompt": full_prompt,
+            "stream": False,
+            "options": {"temperature": temperature,
+                        "num_predict": 800}      # Ollama's max_tokens equivalent
+        }
+\end{lstlisting}
+
+\code{num\_predict} is fixed at 800 regardless of what the caller asked for, and \code{max\_tokens} is popped from \code{kwargs} and discarded. Agents request 3000 tokens and the orchestrator requests 4000; against Ollama they all get 800. That truncation explains a great deal about the local-model evaluation outputs in Chapter~\ref{ch:eval} --- the four-section report the synthesis prompt asks for does not fit in 800 tokens.
+
+\section{Error handling}
+
+\code{OpenRouterClient} is the only one that translates HTTP status codes into actionable messages:
+
+\begin{lstlisting}[style=py,firstnumber=70]
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code
+            if status_code == 401:
+                raise RuntimeError("OpenRouter API Error: Invalid API Key. ...")
+            elif status_code == 402:
+                raise RuntimeError("OpenRouter API Error: You have exceeded "
+                                   "your free tier limit or credits.")
+            elif status_code == 404:
+                raise RuntimeError(f"OpenRouter API Error: Model '{self.model}' "
+                                   "not found. ...")
+\end{lstlisting}
+
+The other three wrap everything in a single \code{RuntimeError} carrying the original exception text. Google additionally treats an empty \code{response.text} as an error, which catches the case where Gemini's safety filters block a generation and return a response with no candidates --- a realistic outcome when the prompt describes symptoms and asks for treatment.
+
+\begin{lstlisting}[style=py,firstnumber=142]
+            if not response.text:
+                raise ValueError("Empty response from model")
+\end{lstlisting}
+
+\section{Timeouts}
+
+Both HTTP clients use 180 seconds. That is generous, and deliberately so: the slow path can issue four sequential generations, and a 3B model on CPU is not fast.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}l l l@{}}
+\toprule
+\textbf{Client} & \textbf{Timeout} & \textbf{Set where} \\
+\midrule
+\code{OpenRouterClient} & 180~s & \code{requests.post(..., timeout=180)} \\
+\code{OllamaClient} & 180~s generate, 2~s availability probe & \code{is\_available()} uses the short one \\
+\code{GoogleClient} & SDK default & not overridden \\
+\code{OpenAIClient} & SDK default & not overridden \\
+\bottomrule
+\end{tabular}
+\caption{Timeout settings. A full slow-path consultation can legitimately take several minutes.}
+\end{table}

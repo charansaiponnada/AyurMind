@@ -1,0 +1,298 @@
+% =====================================================================
+%  AyurMind - Codebase Documentation
+%  Build:  pdflatex ayurmind_docs.tex  (run twice for the ToC)
+% =====================================================================
+\documentclass[11pt,a4paper]{report}
+
+% ---------- encoding & fonts ----------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+% ---------- layout ----------
+\usepackage[a4paper,margin=2.4cm,headheight=22pt]{geometry}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{enumitem}
+\setlist{itemsep=2pt,parsep=0pt,topsep=4pt}
+
+% ---------- tables ----------
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{multirow}
+
+% ---------- graphics ----------
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc,fit,backgrounds,decorations.pathreplacing,patterns}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage{float}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+
+% ---------- code ----------
+\usepackage{listings}
+
+% ---------- boxes ----------
+\usepackage[most]{tcolorbox}
+
+% ---------- links (load late) ----------
+\usepackage[colorlinks=true,linkcolor=deepgreen,citecolor=deepgreen,
+            urlcolor=linkblue,pdftitle={AyurMind Codebase Documentation},
+            pdfauthor={AyurMind}]{hyperref}
+
+% =====================================================================
+%  Palette
+% =====================================================================
+\definecolor{deepgreen}{HTML}{2E6B4F}
+\definecolor{midgreen}{HTML}{4A9370}
+\definecolor{palegreen}{HTML}{E8F2EC}
+\definecolor{clay}{HTML}{B5651D}
+\definecolor{paleclay}{HTML}{FBEEE2}
+\definecolor{ink}{HTML}{22282B}
+\definecolor{slate}{HTML}{5A6670}
+\definecolor{linkblue}{HTML}{1F5C8B}
+\definecolor{palegrey}{HTML}{F4F5F6}
+\definecolor{rulegrey}{HTML}{D6DADC}
+\definecolor{plum}{HTML}{6B3F84}
+\definecolor{paleplum}{HTML}{F1EAF6}
+\definecolor{amber}{HTML}{B08800}
+\definecolor{paleamber}{HTML}{FDF6DC}
+\definecolor{brick}{HTML}{A03A2E}
+\definecolor{palebrick}{HTML}{FAE9E7}
+
+% =====================================================================
+%  Headers / footers
+% =====================================================================
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rulegrey}\leaders\hrule height \headrulewidth\hfill}}
+\fancyhead[L]{\small\color{slate}\nouppercase{\leftmark}}
+\fancyhead[R]{\small\color{slate}AyurMind}
+\fancyfoot[C]{\small\color{slate}\thepage}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\color{slate}\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% =====================================================================
+%  Section styling
+% =====================================================================
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries\color{deepgreen}}
+  {\normalsize\color{clay}\MakeUppercase{Chapter \thechapter}}
+  {6pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-20pt}{26pt}
+
+\titleformat{\section}
+  {\normalfont\Large\bfseries\color{deepgreen}}{\thesection}{0.7em}{}
+\titleformat{\subsection}
+  {\normalfont\large\bfseries\color{ink}}{\thesubsection}{0.7em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\bfseries\color{slate}}{\thesubsubsection}{0.7em}{}
+
+% =====================================================================
+%  Code listing styles
+% =====================================================================
+\lstdefinestyle{py}{
+  language=Python,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{plum}\bfseries,
+  commentstyle=\color{midgreen}\itshape,
+  stringstyle=\color{clay},
+  numbers=left,
+  numberstyle=\ttfamily\tiny\color{slate},
+  numbersep=6pt,
+  showstringspaces=false,
+  breaklines=true,
+  breakatwhitespace=false,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{midgreen},
+  framexleftmargin=24pt,
+  xleftmargin=30pt,
+  backgroundcolor=\color{palegrey},
+  tabsize=4,
+  captionpos=b,
+  columns=fullflexible,
+  keepspaces=true,
+  literate={-}{-}1 {~}{{$\sim$}}1,
+}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\scriptsize\color{ink},
+  numbers=none,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{clay},
+  framexleftmargin=6pt,
+  xleftmargin=14pt,
+  backgroundcolor=\color{paleclay},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  literate={-}{-}1,
+}
+
+\lstdefinestyle{plain}{
+  basicstyle=\ttfamily\scriptsize\color{ink},
+  numbers=none,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{rulegrey},
+  framexleftmargin=6pt,
+  xleftmargin=14pt,
+  backgroundcolor=\color{palegrey},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  literate={-}{-}1,
+}
+
+\lstdefinestyle{json}{
+  basicstyle=\ttfamily\scriptsize,
+  stringstyle=\color{clay},
+  numbers=none,
+  frame=leftline,
+  framerule=2pt,
+  rulecolor=\color{plum},
+  framexleftmargin=6pt,
+  xleftmargin=14pt,
+  backgroundcolor=\color{paleplum},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  literate={-}{-}1,
+}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\fpath}[1]{\texttt{\small\color{deepgreen}#1}}
+
+% let long monospace identifiers break rather than run into the margin
+\setlength{\emergencystretch}{3em}
+\hyphenpenalty=1000
+\sloppy
+
+% =====================================================================
+%  Callout boxes
+% =====================================================================
+\tcbset{calloutbase/.style={
+  enhanced, breakable, boxrule=0pt, leftrule=3pt, arc=1pt,
+  left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\bfseries\small, coltitle=white, titlerule=0pt,
+  attach boxed title to top left={xshift=3pt, yshift=-1mm},
+  boxed title style={boxrule=0pt, arc=1pt, left=5pt, right=5pt,
+                     top=2pt, bottom=2pt}}}
+
+\newtcolorbox{note}[1][]{calloutbase, colback=palegreen, colframe=midgreen,
+  colbacktitle=midgreen, #1}
+
+\newtcolorbox{warn}[1][]{calloutbase, colback=paleamber, colframe=amber,
+  colbacktitle=amber, #1}
+
+\newtcolorbox{bug}[1][]{calloutbase, colback=palebrick, colframe=brick,
+  colbacktitle=brick, #1}
+
+% =====================================================================
+%  TikZ node styles
+% =====================================================================
+\tikzset{
+  blk/.style={rectangle, rounded corners=3pt, draw=#1, fill=#1!8,
+              line width=0.9pt, align=center, inner sep=6pt,
+              font=\footnotesize, minimum height=9mm},
+  lyr/.style={rectangle, rounded corners=5pt, draw=#1!50, fill=#1!4,
+              line width=0.7pt, dashed, inner sep=9pt},
+  db/.style={cylinder, shape border rotate=90, aspect=0.28, draw=#1,
+             fill=#1!8, line width=0.9pt, align=center, font=\footnotesize,
+             inner sep=5pt, minimum height=11mm},
+  dia/.style={diamond, aspect=2.2, draw=#1, fill=#1!8, line width=0.9pt,
+              align=center, font=\scriptsize, inner sep=2pt},
+  ar/.style={-{Stealth[length=2.4mm,width=1.8mm]}, line width=0.8pt, draw=slate},
+  arb/.style={-{Stealth[length=2.4mm,width=1.8mm]}, line width=1.1pt, draw=#1},
+  lbl/.style={font=\scriptsize\itshape, color=slate, fill=white, inner sep=1.5pt},
+  lifeline/.style={draw=rulegrey, line width=0.7pt, dash pattern=on 2pt off 2pt},
+}
+
+% =====================================================================
+\begin{document}
+
+% ---------------------------------------------------------------
+%  TITLE PAGE
+% ---------------------------------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{1.2cm}
+
+\begin{tikzpicture}
+  \fill[deepgreen] (0,0) rectangle (16,0.16);
+\end{tikzpicture}
+
+\vspace{1.4cm}
+
+{\fontsize{46}{50}\selectfont\bfseries\color{deepgreen} AyurMind\par}
+
+\vspace{0.5cm}
+{\LARGE\color{ink} Codebase Documentation\par}
+
+\vspace{0.35cm}
+{\large\color{slate} A multi-agent retrieval system over the Charaka Samhita\par}
+
+\vspace{1.8cm}
+
+\begin{tikzpicture}[scale=0.95, transform shape]
+  \node[blk=clay,   minimum width=30mm] (ui)   at (0,0)    {Gradio UI};
+  \node[blk=deepgreen, minimum width=30mm] (or) at (0,-1.5) {Orchestrator};
+  \node[blk=midgreen, minimum width=17mm] (a1) at (-3.3,-3.1) {Prakriti};
+  \node[blk=midgreen, minimum width=17mm] (a2) at (0,-3.1)    {Dosha};
+  \node[blk=midgreen, minimum width=17mm] (a3) at (3.3,-3.1)  {Treatment};
+  \node[db=plum, minimum width=26mm] (db) at (0,-5.1) {ChromaDB};
+
+  \draw[arb=clay]  (ui) -- (or);
+  \draw[arb=deepgreen] (or) -- (a1);
+  \draw[arb=deepgreen] (or) -- (a2);
+  \draw[arb=deepgreen] (or) -- (a3);
+  \draw[arb=plum] (a1) -- (db);
+  \draw[arb=plum] (a2) -- (db);
+  \draw[arb=plum] (a3) -- (db);
+\end{tikzpicture}
+
+\vfill
+
+{\large\color{ink}Repository: \code{AyurMind}\par}
+\vspace{0.2cm}
+{\color{slate} Documented from commit \code{9213703} on branch \code{main}\par}
+\vspace{0.2cm}
+{\color{slate} 26 July 2026\par}
+
+\vspace{1.2cm}
+\begin{tikzpicture}
+  \fill[clay] (0,0) rectangle (16,0.16);
+\end{tikzpicture}
+\end{titlepage}
+
+% ---------------------------------------------------------------
+\pagenumbering{roman}
+\setcounter{tocdepth}{2}
+\tableofcontents
+\cleardoublepage
+\pagenumbering{arabic}
+
+\input{sections/01_overview}
+\input{sections/02_layout}
+\input{sections/03_setup}
+\input{sections/04_ingestion}
+\input{sections/05_retrieval}
+\input{sections/06_llm}
+\input{sections/07_agents}
+\input{sections/08_ui}
+\input{sections/09_deployment}
+\input{sections/10_evaluation}
+\input{sections/11_gaps}
+\input{sections/12_extending}
+\input{sections/13_appendix}
+
+\end{document}

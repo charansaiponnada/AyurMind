@@ -1,0 +1,170 @@
+\chapter{Getting It Running}
+
+\section{What you need}
+
+Python 3.9 or newer, around 8~GB of RAM, and roughly 5~GB of free disk. The RAM figure is driven by \code{all-mpnet-base-v2}, which loads into memory at startup and stays there; the disk figure is the scraped HTML plus the Chroma index. You also need one of: a Google AI API key, an OpenAI API key, or a local Ollama installation.
+
+\section{Install}
+
+\begin{lstlisting}[style=shell]
+git clone https://github.com/charansaiponnada/AyurMind.git
+cd AyurMind
+
+python -m venv venv
+venv\Scripts\activate          # Windows
+source venv/bin/activate        # macOS / Linux
+
+pip install -r requirements.txt
+\end{lstlisting}
+
+\fpath{requirements.txt} pins 25 packages including Jupyter, black, flake8, mypy and pytest. For a runtime-only install, \fpath{requirements\_simplified.txt} drops the development tooling and the unused LangChain packages.
+
+\section{Configuration}
+
+There is no config file and no \code{.env.example} in the repository. Create \code{.env} yourself in the project root; \code{python-dotenv} loads it from both \fpath{src/ui/gradio\_app.py} and \fpath{src/scraper/charaka\_scraper.py}. A minimal working file is three lines:
+
+\begin{lstlisting}[style=shell]
+GOOGLE_API_KEY=your_key_here
+GOOGLE_MODEL=gemini-1.5-flash
+GRADIO_PORT=7860
+\end{lstlisting}
+
+Every variable the code reads, with the default it falls back to:
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Variable} & \textbf{Default} & \textbf{Read by} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Provider selection}}\\
+\code{USE\_LOCAL\_LLM} & \code{false} & \code{AyurMindApp.\_\_init\_\_} --- tries Ollama first \\
+\code{USE\_OPENAI} & \code{false} & \code{AyurMindApp.\_\_init\_\_} --- tries OpenAI second \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Google (the default provider)}}\\
+\code{GOOGLE\_API\_KEY} & --- & \code{GoogleClient}; raises \code{ValueError} if absent \\
+\code{GOOGLE\_MODEL} & \code{gemini-1.5-flash} & \code{GoogleClient} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{OpenAI}}\\
+\code{OPENAI\_API\_KEY} & --- & \code{OpenAIClient} \\
+\code{OPENAI\_MODEL} & \code{gpt-4o-mini} & \code{OpenAIClient} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Ollama}}\\
+\code{LOCAL\_MODEL} & \code{llama3.2:3b} & \code{OllamaClient} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{OpenRouter (client exists, app never selects it)}}\\
+\code{OPENROUTER\_API\_KEY} & --- & \code{OpenRouterClient} \\
+\code{DEFAULT\_MODEL} & \code{mistralai/mistral-7b-instruct:free} & \code{OpenRouterClient} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Retrieval}}\\
+\code{EMBEDDING\_MODEL} & \code{sentence-transformers/all-mpnet-base-v2} & \code{EmbeddingGenerator} \\
+\code{VECTOR\_DB\_PATH} & \code{./data/vectordb} & \code{AyurvedicVectorStore} \\
+\code{MAX\_CHUNKS\_PER\_QUERY} & \code{5} & \code{RAGRetriever} \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Agents}}\\
+\code{ORCHESTRATOR\_TEMP} & \code{0.2} & \code{OrchestratorAgent}, synthesis only \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Scraper}}\\
+\code{REQUEST\_DELAY} & \code{2} & seconds between HTTP requests \\
+\code{MAX\_RETRIES} & \code{3} & attempts per page \\
+\code{TIMEOUT} & \code{30} & seconds per request \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{Interface}}\\
+\code{GRADIO\_PORT} & \code{7860} & \code{AyurMindApp.launch} \\
+\code{GRADIO\_SHARE} & \code{false} & \code{AyurMindApp.launch}; also flips bind address \\
+\bottomrule
+\end{tabularx}
+\caption{Complete environment variable reference, gathered from every \code{os.getenv} call in the codebase.}
+\end{table}
+
+\begin{warn}[title={Agent temperatures are hard-coded}]
+Only the orchestrator's synthesis temperature is configurable. The three specialists set theirs in their constructors --- 0.3 for Prakriti and Dosha, 0.4 for Treatment --- and the fast path uses a literal \code{0.4}. Changing those means editing the agent files.
+\end{warn}
+
+\section{The four-step pipeline}
+
+The scripts are numbered because each one consumes what the previous one produced. Running them out of order fails loudly rather than silently.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=6mm]
+  \node[blk=slate,  minimum width=27mm, align=center] (s1) {\textbf{01}\\scrape + chunk};
+  \node[blk=slate,  minimum width=27mm, right=13mm of s1] (s2) {\textbf{02}\\embed + index};
+  \node[blk=slate,  minimum width=27mm, right=13mm of s2] (s3) {\textbf{03}\\smoke test};
+  \node[blk=slate,  minimum width=27mm, right=13mm of s3] (s4) {\textbf{04}\\launch UI};
+
+  \node[font=\scriptsize\ttfamily, color=deepgreen, below=5mm of s1, align=center] (f1) {data/raw/\\data/processed/};
+  \node[font=\scriptsize\ttfamily, color=deepgreen, below=5mm of s2, align=center] (f2) {data/vectordb/};
+  \node[font=\scriptsize\ttfamily, color=slate, below=5mm of s3, align=center] (f3) {stdout only};
+  \node[font=\scriptsize\ttfamily, color=slate, below=5mm of s4, align=center] (f4) {:7860};
+
+  \node[font=\scriptsize\itshape, color=slate, above=3mm of s1] {15--30 min};
+  \node[font=\scriptsize\itshape, color=slate, above=3mm of s2] {5--10 min};
+  \node[font=\scriptsize\itshape, color=slate, above=3mm of s3] {1 min};
+  \node[font=\scriptsize\itshape, color=slate, above=3mm of s4] {instant};
+
+  \draw[arb=deepgreen] (s1) -- (s2);
+  \draw[arb=deepgreen] (s2) -- (s3);
+  \draw[arb=deepgreen] (s3) -- (s4);
+  \draw[ar, dashed] (s1) -- (f1);
+  \draw[ar, dashed] (s2) -- (f2);
+  \draw[ar, dashed] (s3) -- (f3);
+  \draw[ar, dashed] (s4) -- (f4);
+\end{tikzpicture}
+\caption{Pipeline stages with their runtimes and outputs. Only steps 1 and 2 write to disk.}
+\end{figure}
+
+\begin{lstlisting}[style=shell]
+python scripts/01_scrape_data.py     # -> data/raw/ and data/processed/
+python scripts/02_build_vectordb.py  # -> data/vectordb/
+python scripts/03_test_rag.py        # prints three retrieval results
+python scripts/04_run_app.py         # http://127.0.0.1:7860
+\end{lstlisting}
+
+Step 4 accepts a flag:
+
+\begin{lstlisting}[style=shell]
+python scripts/04_run_app.py --share
+\end{lstlisting}
+
+which sets Gradio's \code{share=True}, binds to \code{0.0.0.0} and produces a temporary public \code{gradio.live} URL. Setting \code{GRADIO\_SHARE=true} in \code{.env} does the same thing.
+
+\subsection{What step 1 actually prints}
+
+\fpath{scripts/01\_scrape\_data.py} runs two phases in one process --- \code{CharakaScraper.scrape\_all()} then \code{AyurvedicTextProcessor.process\_all()} --- and reports counts from both:
+
+\begin{lstlisting}[style=py,firstnumber=36]
+    print("SCRAPING COMPLETE!")
+    print(f"Scraped {scraping_summary['total_sections']} sections")
+    print(f"Total chapters: {scraping_summary['total_chapters']}")
+    print(f"Total words: {scraping_summary['total_words']:,}")
+    ...
+    print(f"Created {processing_summary['total_chunks']:,} chunks")
+    print(f"Total tokens: {processing_summary['total_tokens']:,}")
+    print(f"Avg chunk size: {processing_summary['avg_chunk_size']:.0f} tokens")
+    print("Category breakdown:")
+    for category, count in processing_summary['categories'].items():
+        print(f"  - {category}: {count} chunks")
+\end{lstlisting}
+
+The category breakdown at the end is the number worth watching. It tells you how many chunks each of the three specialist agents will be able to see, and a badly skewed distribution here shows up later as an agent that retrieves nothing useful. Section~\ref{sec:categorise} explains why the skew happens.
+
+\section{Failure modes on a first run}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\textbf{Symptom} & \textbf{Cause and fix} \\
+\midrule
+\code{ModuleNotFoundError: src} & The scripts insert \code{../src} into \code{sys.path}, but \fpath{evaluation/} scripts insert the project \emph{root} instead. Run scripts from the repository root. \\
+\code{Run 01\_scrape\_data.py first!} & \fpath{scripts/02\_build\_vectordb.py} checks for \code{data/processed/all\_chunks.json} and exits with code 1 when it is missing. \\
+\code{ValueError: Google API key not found} & No \code{.env}, or the file is not in the directory you launched from. \code{load\_dotenv()} searches upward from the current working directory. \\
+Retrieval returns zero chunks & The Chroma collection is empty. \code{AyurvedicVectorStore.get\_stats()['total\_chunks']} tells you the count in one line. \\
+Scraper stalls or returns empty pages & \code{REQUEST\_DELAY} is 2 seconds by default and the scraper doubles it on retry. The chapter-link extractor is tied to the site's MediaWiki markup (\code{div\#mw-content-text}); a site redesign breaks it silently, yielding zero chapters rather than an error. \\
+\bottomrule
+\end{tabularx}
+\caption{The errors you are most likely to see, and where they come from.}
+\end{table}

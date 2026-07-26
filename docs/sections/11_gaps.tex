@@ -1,0 +1,118 @@
+\chapter{Where the Documentation and the Code Disagree}
+\label{ch:gaps}
+
+The README and the two mermaid diagrams describe an earlier version of AyurMind. Anyone reading them as a specification will build the wrong mental model, so this chapter lists every divergence with the file that settles it.
+
+\section{Claims that are no longer true}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{3.6cm} X p{3.3cm}@{}}
+\toprule
+\textbf{Claim} & \textbf{What the code does} & \textbf{Evidence} \\
+\midrule
+``OpenRouter (Free Tier) --- RECOMMENDED'' & The app never constructs \code{OpenRouterClient}. Selection order is Ollama, OpenAI, Google, with Google as the unconditional fallback. & \fpath{gradio\_app.py} lines 48--73; \code{openrouter\_client} is not imported anywhere \\
+\addlinespace
+``LangChain for RAG framework'' & Zero LangChain imports. Retrieval is \code{sentence-transformers} plus the Chroma client directly. \code{langchain==0.1.0} and \code{langchain-community} are still pinned. & \code{grep -rn langchain --include=*.py} returns nothing \\
+\addlinespace
+Knowledge base includes Sushruta Samhita and Ashtanga Hridaya & \code{CharakaScraper.SECTIONS} has eight entries, all from carakasamhitaonline.com. The other two texts appear only in the mermaid diagram and the roadmap. & \fpath{charaka\_scraper.py} lines 34--75 \\
+\addlinespace
+``Llama-3-8B / Mistral-7B via Ollama'' as the model layer & The Ollama default is \code{llama3.2:3b}, and Ollama is off unless \code{USE\_LOCAL\_LLM=true}. The shipped default is \code{gemini-1.5-flash}. & \fpath{local\_client.py} line 18, \fpath{google\_client.py} line 29 \\
+\addlinespace
+``Bilingual support (English + Hindi)'' listed as implemented & No language detection, no translation, no Hindi prompt or resource anywhere in \code{src/}. The evaluation README lists bilingual testing as not implemented. & no matches for Hindi handling in \code{src/} \\
+\addlinespace
+``Conversation memory'' listed under Roadmap (not yet done) & Conversation memory \emph{is} implemented --- every client takes \code{conversation\_history} and the UI maintains it. The roadmap is stale in the other direction. & \fpath{base\_agent.py}, all four clients \\
+\addlinespace
+\code{pytest tests/} & No \code{tests/} directory and no test file in the repository. & \code{git ls-files} \\
+\addlinespace
+\code{config/config.yaml}, \code{config/prompts.yaml} & No config directory. Prompts are Python string literals inside each agent; settings come from \code{os.getenv} at each call site. & \code{git ls-files} \\
+\addlinespace
+\code{.env.example}, \code{LICENSE}, \code{CONTRIBUTING.md} & None are tracked, although the README links to two of them and the badge claims MIT. & \code{git ls-files} \\
+\addlinespace
+``Chunk Size: 800 tokens with 200 token overlap'' & Accurate. & \fpath{data\_processor.py} lines 28--29 \\
+\addlinespace
+``Embedding Model: all-mpnet-base-v2'' & Accurate. & \fpath{embeddings.py} line 10 \\
+\bottomrule
+\end{tabularx}
+\caption{README claims checked against source. The last two rows are included because they are correct and load-bearing.}
+\end{table}
+
+\section{Defects found while reading}
+
+Ordered by how much they affect a running system.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}p{0.5cm} p{4.7cm} X@{}}
+\toprule
+\textbf{\#} & \textbf{Where} & \textbf{Problem and effect} \\
+\midrule
+1 & \fpath{gradio\_app.py}:161, \fpath{app.py}:17, \fpath{Dockerfile}:38 &
+\code{launch()} derives \code{server\_name} from \code{share}, so a container binds to \code{127.0.0.1} and published ports reach nothing. The healthcheck curls from inside the container and passes anyway. \\
+\addlinespace
+2 & \fpath{vectorstore.py}:37--40 vs \fpath{orchestrator.py}:17 &
+The source filter compares the extracted phrase (``Siddhi Sthana'') against stored display names (``Section on Therapeutic Procedures''). Chroma equality never matches, so naming a Sthana returns zero chunks instead of focused ones. \\
+\addlinespace
+3 & \fpath{google\_client.py}:118--127, \fpath{openai\_client.py}:33--39 &
+Neither client drops the trailing history turn, but the UI has already appended the current message. Google and OpenAI receive the user's question twice on every call; OpenRouter and Ollama do not. \\
+\addlinespace
+4 & \fpath{data\_processor.py}:229--238 &
+Category assignment tests dosha names first, so treatment and diagnostic passages that mention Vata/Pitta/Kapha are tagged \code{prakriti}. The treatment and dosha agents see a smaller corpus than intended. \\
+\addlinespace
+5 & \fpath{local\_client.py}:80 &
+\code{num\_predict} is hard-coded to 800 and \code{max\_tokens} is discarded. Agents ask for 3000 and synthesis asks for 4000; against Ollama every response is capped at 800. \\
+\addlinespace
+6 & \fpath{orchestrator.py}:29--31 &
+Routing is 20 substrings. \code{'help'} triggers the treatment agent on any sentence containing it; clinical descriptions that avoid the list skip the pipeline entirely. \\
+\addlinespace
+7 & \fpath{local\_client.py}:24--30 &
+\code{OllamaClient.\_\_init\_\_} logs a warning instead of raising when Ollama is unreachable, so \code{USE\_LOCAL\_LLM=true} with the daemon down selects Ollama and fails at generation rather than falling through to OpenAI or Google. \\
+\addlinespace
+8 & \fpath{vectorstore.py}:21--30 &
+\code{add\_chunks} never clears the collection, so re-running step 2 without deleting \code{data/vectordb/} re-inserts existing IDs. \\
+\addlinespace
+9 & \fpath{gradio\_app.py}:113 &
+The UI reads only \code{final\_response}. \code{retrieved\_sources} and \code{agent\_responses} are computed and thrown away, so no citation ever reaches the screen despite the whole pipeline being built to produce them. \\
+\addlinespace
+10 & \fpath{gradio\_app.py}:147--149 &
+\code{msg.submit} is registered twice, so Enter and the Send button clear the textbox at different moments. \\
+\addlinespace
+11 & \fpath{gradio\_app.py}:134 &
+\code{gr.Chatbot} is created without \code{type="messages"} while the handler returns message dictionaries, making correctness dependent on the installed Gradio default. \code{gradio} is unpinned in \fpath{requirements.txt}. \\
+\addlinespace
+12 & \fpath{evaluation/run\_evaluation.py}:167 &
+The driver builds the full orchestrator, then registers only \code{vanilla\_llm} in \code{models}. \code{run\_single\_agent\_rag} and \code{run\_ayurmind} are dead in this file. \\
+\addlinespace
+13 & \fpath{dataset/evaluation\_cases.csv} &
+Case 20 is labelled \code{Pitta-Vata} where every other dual case uses \code{Vata-Pitta}; six \code{Unknown} and one \code{Multiple} label are unmatchable by any extractor. Accuracy is capped at 82.5\% by the labels alone. \\
+\addlinespace
+14 & \fpath{treatment\_agent.py}:20 &
+The mandatory supervision warning for Vamana, Virechana and Basti is a prompt instruction with no code-level verification before display. \\
+\addlinespace
+15 & \fpath{retriever.py}:13--30 &
+No distance threshold, no reranking. The nearest five vectors are always used, even when nothing relevant exists, and are presented to the model as authoritative context. \\
+\bottomrule
+\end{tabularx}
+\caption{Defects, most impactful first. Items 1--3 have concrete one-file fixes.}
+\end{table}
+
+\section{Smaller inconsistencies}
+
+\begin{itemize}[leftmargin=*]
+  \item \code{AyurvedicVectorStore.get\_stats()} returns \code{'categories': \{\}} unconditionally --- a stub that was never filled in. The real histogram is in \code{data/processed/processing\_summary.json}.
+  \item \code{RAGRetriever.build\_context()} and \code{BaseAgent.retrieve\_context\_and\_sources()} format context identically. Only the second is used by agents; only the first is used by the evaluation baseline, and it has no \code{source\_filter} parameter.
+  \item \code{BaseAgent.generate\_response()} carries a retrieval branch for \code{context is None} that \code{process()} can never trigger, since \code{process()} always retrieves first.
+  \item \fpath{GENERATE\_PROJECT.py} prints setup instructions and creates nothing. Its docstring says it ``generates the entire AyurMind project''; the body is print statements.
+  \item \fpath{package.json} declares one dependency, \code{docx}, used by \fpath{research\_proposal.js} to generate the conference paper. Neither is part of the application.
+  \item \fpath{requirements.txt} pins \code{openai==1.7.2} with the comment ``For OpenRouter compatibility'', but \code{OpenRouterClient} uses raw \code{requests} and \code{OpenAIClient} uses the SDK against OpenAI proper.
+\end{itemize}
+
+\section{If you fix three things, fix these}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{The container bind address} (defect 1). Docker deployment does not currently work, and the healthcheck hides it. Add a \code{server\_name} parameter to \code{launch()} that reads \code{GRADIO\_SERVER\_NAME}.
+  \item \textbf{Surface the citations} (defect 9). The retrieval pipeline exists to make answers checkable, and the answer arrives with no way to check it. One \code{gr.Accordion} listing \code{retrieved\_sources} converts a claim about grounding into a visible property.
+  \item \textbf{Category assignment} (defect 4). The three-agent design assumes three meaningful corpus slices. Scoring all three keyword sets and taking the maximum, or allowing multi-category tags, restores the premise the architecture rests on.
+\end{enumerate}

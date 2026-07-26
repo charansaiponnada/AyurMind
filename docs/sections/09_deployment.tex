@@ -1,0 +1,164 @@
+\chapter{Packaging and Deployment}
+
+Three deployment routes are set up: Hugging Face Spaces, Docker, and an ngrok tunnel over a local run. All three serve the same Gradio app on port 7860.
+
+\section{Hugging Face Spaces}
+
+\fpath{app.py} is the Spaces entry point. Spaces looks for a top-level \code{app.py} and runs it.
+
+\begin{lstlisting}[style=py]
+#!/usr/bin/env python3
+"""AyurMind - Hugging Face Spaces Entry Point"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / 'src'))
+
+from ui.gradio_app import AyurMindApp
+
+if __name__ == "__main__":
+    print("Launching AyurMind on Hugging Face Spaces...")
+    app = AyurMindApp()
+    # HF Spaces requires server_name="0.0.0.0" and will handle the public URL
+    app.launch(share=False, server_port=7860)
+\end{lstlisting}
+
+\begin{bug}[title={The comment and the code disagree}]
+The comment says Spaces needs \code{server\_name="0.0.0.0"}, then the call passes \code{share=False}, which makes \code{launch()} pick \code{127.0.0.1}. \code{app.py} does not expose a \code{server\_name} parameter, so there is no way to override it from here. The same defect affects Docker, described below. The fix is to add a \code{server\_name} argument to \code{AyurMindApp.launch()} and let \code{GRADIO\_SERVER\_NAME} win when set.
+\end{bug}
+
+Deployment secrets go in the Space's repository settings, not in a committed \code{.env}:
+
+\begin{lstlisting}[style=shell]
+GOOGLE_API_KEY=your_key_here
+USE_OPENAI=false
+\end{lstlisting}
+
+\subsection{Getting the vector database into the Space}
+
+\fpath{DEPLOYMENT.md} offers two options and the first is the right one. Build \code{data/vectordb/} locally with \fpath{scripts/02\_build\_vectordb.py} and upload the directory --- roughly 100~MB --- alongside the code. Scraping the source site from inside a Space costs 15--30 minutes of cold start and puts avoidable load on carakasamhitaonline.com.
+
+The alternative in the guide builds on first startup:
+
+\begin{lstlisting}[style=py]
+import os
+if not os.path.exists("data/vectordb/chroma.sqlite3"):
+    print("Building vector database...")
+    os.system("python scripts/02_build_vectordb.py")
+\end{lstlisting}
+
+This only works if \code{data/processed/all\_chunks.json} was uploaded, since step 2 consumes step 1's output. Uploading the chunks JSON and rebuilding the index is a reasonable middle path when the built index is awkward to transfer.
+
+\section{Docker}
+
+\begin{lstlisting}[style=shell]
+FROM python:3.10-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+RUN mkdir -p data/raw data/processed data/vectordb logs
+
+ENV PYTHONUNBUFFERED=1
+ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV GRADIO_SERVER_PORT=7860
+
+EXPOSE 7860
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:7860/ || exit 1
+
+CMD ["python", "scripts/04_run_app.py"]
+\end{lstlisting}
+
+\code{requirements.txt} is copied before the source so that a code change does not invalidate the pip layer. \code{build-essential} is needed because some pinned wheels compile from source on slim images; \code{curl} exists for the healthcheck.
+
+\begin{bug}[title={The container binds to localhost and is unreachable}]
+The Dockerfile sets \code{GRADIO\_SERVER\_NAME=0.0.0.0}, but Gradio only reads that variable when \code{launch()} is called without an explicit \code{server\_name}. \code{AyurMindApp.launch()} always passes one, and with \code{share=False} that value is \code{127.0.0.1}. The server therefore listens on the container's loopback interface only, and \code{-p 7860:7860} forwards to a port nothing external can reach. The healthcheck still passes, because \code{curl} runs \emph{inside} the container where loopback works --- so the container reports healthy while being unusable.
+
+Two ways out. Set \code{GRADIO\_SHARE=true} in the environment, which flips the bind to \code{0.0.0.0} as a side effect but also creates an unwanted public gradio.live tunnel. Or make the bind address its own setting:
+
+\begin{lstlisting}[style=py]
+    def launch(self, share=None, server_port=None, server_name=None):
+        ...
+        if server_name is None:
+            server_name = os.getenv("GRADIO_SERVER_NAME",
+                                    "0.0.0.0" if share else "127.0.0.1")
+\end{lstlisting}
+\end{bug}
+
+\subsection{Compose}
+
+\begin{lstlisting}[style=shell]
+services:
+  ayurmind:
+    build: {context: ., dockerfile: Dockerfile}
+    container_name: ayurmind
+    ports: ["7860:7860"]
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - USE_OPENAI=${USE_OPENAI:-false}
+      - GRADIO_SHARE=${GRADIO_SHARE:-false}
+      - GRADIO_PORT=7860
+    volumes:
+      - ./data:/app/data      # persist the vector database
+      - ./logs:/app/logs
+    restart: unless-stopped
+\end{lstlisting}
+
+The \code{./data} mount is the important line. Without it the Chroma database lives in the container's writable layer and disappears on \code{docker compose down}, forcing a full rebuild. Note that \code{USE\_LOCAL\_LLM} is not passed through --- reaching a host Ollama from inside the container would also need \code{host.docker.internal} networking, so the local-model path is effectively container-unsupported.
+
+\fpath{.dockerignore} excludes \code{evaluation/}, notebooks, all markdown except the README, and the \code{.git} directory. It does \emph{not} exclude \code{data/}, and there is a commented-out block showing where you would add it:
+
+\begin{lstlisting}[style=shell]
+# Data (can be large - build on container startup if needed)
+# Uncomment if you want to build vectordb inside container:
+# data/vectordb/
+# data/processed/
+\end{lstlisting}
+
+Leaving it in means \code{COPY . .} bakes the vector database into the image, which is what you want for a self-contained deployment and not what you want if you are also bind-mounting \code{./data}.
+
+\section{Local sharing}
+
+Two options for showing the app to someone else without deploying.
+
+\begin{lstlisting}[style=shell]
+python scripts/04_run_app.py --share
+\end{lstlisting}
+
+produces a temporary \code{*.gradio.live} URL, valid for 72 hours. The repository contains \fpath{.gradio/certificate.pem}, which is the CA bundle Gradio's FRP tunnel client uses --- it was committed when the share feature was added (commit \emph{``Added the feature to share the gradio UI''}).
+
+If the tunnel is blocked, \fpath{DEPLOYMENT.md} suggests ngrok:
+
+\begin{lstlisting}[style=shell]
+python scripts/04_run_app.py     # terminal 1
+ngrok http 7860                  # terminal 2
+\end{lstlisting}
+
+\begin{warn}[title={A public link exposes an unauthenticated medical chatbot}]
+Neither route adds authentication or rate limiting. Anyone with the URL can spend your API quota, and the only safety control between them and the model is the disclaimer banner. Gradio supports \code{auth=("user", "pass")} on \code{launch()}; adding it before sharing a link publicly is a one-line change.
+\end{warn}
+
+\section{Resource notes}
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\textbf{Resource} & \textbf{Requirement} & \textbf{Why} \\
+\midrule
+RAM & 8~GB minimum & \code{all-mpnet-base-v2} resident, plus Chroma's index \\
+Disk & \textasciitilde 5~GB & scraped HTML, chunk JSON, Chroma segments, model cache \\
+Cold start & 30--60~s & downloading and loading sentence-transformer weights \\
+HF free tier & 2 vCPU, 16~GB & sufficient; the container start period of 60~s accounts for it \\
+\bottomrule
+\end{tabularx}
+\caption{What the deployment actually consumes.}
+\end{table}
